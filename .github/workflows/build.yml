@@ -1,0 +1,164 @@
+name: Build
+
+on:
+  push:
+    tags: ['v*']
+    # Branch pushes build against the latest upstream release and publish
+    # nothing — the release/dispatch jobs are tag-only. This is how the
+    # pipeline gets exercised before a tag is cut.
+    branches: ['**']
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Upstream qbz tag to build (e.g. v2.0.2)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            qemu: false
+            timeout: 60
+          # Native arm64 runner — no emulation, so this is as cheap as amd64.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            qemu: false
+            timeout: 60
+          # armhf is arm/v6 in a Raspberry Pi OS rootfs (see
+          # docker/builder.Dockerfile for why cross-compiling is not an
+          # option). GitHub's arm64 runners are Neoverse-based and cannot
+          # execute AArch32, so this is QEMU either way — and emulating a
+          # 381-crate Rust build takes hours, hence the timeout.
+          - arch: armhf
+            runner: ubuntu-latest
+            qemu: true
+            timeout: 350
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v5
+
+      - name: Resolve upstream tag
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "${{ github.event_name }}" in
+            workflow_dispatch)
+              # github.ref_name is a branch here, so the version has to come
+              # from the requested upstream tag.
+              LOCAL_TAG="${{ github.event.inputs.upstream_tag }}"
+              ;;
+            *)
+              if [ "${{ github.ref_type }}" = "tag" ]; then
+                LOCAL_TAG="${{ github.ref_name }}"
+              else
+                # Branch push: nothing is published, so build whatever upstream
+                # is current and mark the version as a CI build.
+                LOCAL_TAG="$(gh release view --repo vicrodh/qbz --json tagName --jq .tagName)"
+                CI_SUFFIX="+ci.$(git rev-parse --short HEAD)"
+              fi
+              ;;
+          esac
+          # Strip prerelease suffix so e.g. v2.0.2-rc1 builds upstream v2.0.2
+          TAG="$(echo "${LOCAL_TAG}" | sed -E 's/-(rc|beta|alpha)[0-9]*$//')"
+          # Debian version: tilde so a prerelease sorts BELOW the final
+          # release (2.0.2~rc1 < 2.0.2), unlike a dash-revision.
+          VERSION="$(echo "${LOCAL_TAG}" | sed -E 's/^v//; s/-(rc|beta|alpha)/~\1/')${CI_SUFFIX:-}"
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "${{ github.ref_name }} → upstream qbz: ${TAG}, deb version: ${VERSION}"
+
+      # Must land at ./upstream — the Dockerfile does COPY upstream/ /build/.
+      - name: Checkout upstream qbz
+        uses: actions/checkout@v5
+        with:
+          repository: vicrodh/qbz
+          ref: ${{ steps.upstream.outputs.tag }}
+          path: upstream
+
+      - name: Set up QEMU
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Install nfpm
+        run: |
+          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' \
+            | sudo tee /etc/apt/sources.list.d/goreleaser.list
+          sudo apt-get update
+          sudo apt-get install -y nfpm
+          nfpm --version
+
+      - name: Build .deb
+        env:
+          # Caches the apt + rustup + cargo layers across runs, which matters
+          # most for the emulated armhf job.
+          BUILDX_CACHE_ARGS: >-
+            --cache-from type=gha,scope=${{ matrix.arch }}
+            --cache-to type=gha,scope=${{ matrix.arch }},mode=max
+        run: |
+          ./scripts/build-qbzd-deb.sh \
+            --arch ${{ matrix.arch }} \
+            --version ${{ steps.upstream.outputs.version }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: qbzd-${{ matrix.arch }}-deb
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: qbzd-*-deb
+          merge-multiple: true
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+
+  notify-apt-repo:
+    name: Trigger APT repo update
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Trigger apt-repo rebuild
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.APT_REPO_TOKEN }}
+          repository: b0bbywan/odio-apt-repo
+          event-type: release-published
+          client-payload: '{"repo": "${{ github.repository }}", "tag": "${{ github.ref_name }}"}'
