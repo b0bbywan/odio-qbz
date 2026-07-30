@@ -17,14 +17,15 @@ binary and `qbzd`, so it depends on the whole GUI runtime (fontconfig,
 freetype, wayland, xcb, GL/EGL) and carries a glibc 2.39 floor from its
 `ubuntu-24.04` builder. There is no 32-bit build at all.
 
-This repo ships the opposite: **daemon only**, no GUI dependencies, glibc 2.36
-floor, and armhf included.
+This repo ships the opposite: **daemon only**, no GUI dependencies, and armhf
+included. The target is Debian 13 / Raspberry Pi OS trixie and later — every
+arch builds there, so the packages ask for glibc 2.41 (see below).
 
 | | upstream `qbz` deb | this repo's `qbzd` deb |
 |---|---|---|
 | contents | `qbz` (GUI) + `qbzd` | `qbzd` only |
 | depends | ALSA + fontconfig/freetype/png/bz2/expat/zlib | ALSA + libssl |
-| glibc floor | 2.39 | 2.36 |
+| glibc floor | 2.39 | 2.41 |
 | arches | amd64, arm64 | amd64, arm64, **armhf** |
 
 The package declares `Conflicts`/`Replaces` on `qbz`, because upstream's
@@ -35,9 +36,9 @@ package installs the same `/usr/bin/qbzd` and
 
 | deb arch | docker platform | rootfs | Rust host |
 |---|---|---|---|
-| `amd64` | `linux/amd64` | `debian:bookworm-slim` | `x86_64-unknown-linux-gnu` |
-| `arm64` | `linux/arm64` | `debian:bookworm-slim` | `aarch64-unknown-linux-gnu` |
-| `armhf` | `linux/arm/v6` | Raspberry Pi OS armhf (bookworm) | `arm-unknown-linux-gnueabihf` |
+| `amd64` | `linux/amd64` | `debian:trixie-slim` | `x86_64-unknown-linux-gnu` |
+| `arm64` | `linux/arm64` | `debian:trixie-slim` | `aarch64-unknown-linux-gnu` |
+| `armhf` | `linux/arm/v6` | Raspberry Pi OS armhf (**trixie**) | `arm-unknown-linux-gnueabihf` |
 
 `armhf` is **ARMv6**, so a Pi 1 / Zero still runs it — the same choice
 `go-odio-api` makes with `GOARM=6`. The package arch stays `armhf` because
@@ -86,6 +87,55 @@ One more trap: `uname -m` reports `armv7l` inside an armv6 container under QEMU,
 so rustup's host detection has to be overridden or it installs an armv7
 toolchain and the binary is v7 again for an unrelated reason.
 
+### Why everything targets trixie
+
+Debian's 64-bit `time_t` transition landed in trixie, so on 32-bit arches every
+struct carrying a `time_t` changed width. `struct timespec` went from 8 bytes to
+16, and libasound was rebuilt for it **without a SONAME bump** — so the
+incompatibility is invisible to the linker and to apt.
+
+A bookworm-built binary therefore installs happily on trixie and then dies. The
+crash is exact: `snd_pcm_status_get_htstamp` writes 16 bytes into the 8-byte
+slot its caller reserved, overruns into the saved `lr`, and the function returns
+into address 0. Reached through cpal, which asks for the timestamp on every
+callback, so it takes the first note played.
+
+The rootfs alone does not fix this. `libc::timespec` is sized from the target
+triple, so it stays 8 bytes on `arm-unknown-linux-gnueabihf` no matter how new
+the rootfs is. What fixes it is `alsa-sys` measuring `sizeof(snd_htimestamp_t)`
+against the rootfs's own ALSA headers and, when that is 16, defining its own
+`timespec` — which `alsa` then uses in place of libc's, and cpal after it. The
+first two shipped on 2026-07-31 as `alsa-sys` 0.6.1 and `alsa` 0.12.1; cpal has
+not followed, so `patches/0003` asks for those two by version and still pins
+cpal from git.
+(`RUST_LIBC_UNSTABLE_GNU_TIME_BITS=64` widens libc's for the whole crate graph
+instead, but it is unstable, and `alsa` 0.11 does not compile with it: its
+`timespec` literals do not fill the private `__pad` a time64 libc adds.)
+
+`ci/abi-probe` asserts the width the crate settled on and then makes the ALSA
+call, because what can regress silently is that measurement — a rootfs whose
+ALSA headers disagree with its libasound, or an alsa-sys bump that drops the
+probe.
+
+The bundled C (`libsqlite3-sys`) needs no equivalent flag: it is self-consistent
+with glibc, which still exports both ABIs of its own symbols. Only a
+third-party library rebuilt for time64 under an unchanged SONAME can bite, and
+libasound is the one in this dependency graph.
+
+The consequence is that **one armhf package cannot serve bookworm and trixie**.
+The 2.41 glibc floor is what enforces the split, and it is the only mechanism
+that does: the `libasound2t64 | libasound2` alternative is a package rename, not
+a guard.
+
+amd64 and arm64 have no such constraint — 64-bit arches always had a 64-bit
+`time_t` — and they were built on bookworm for a while precisely to keep their
+floor at 2.36. That is over: three arches now build on trixie and declare the
+same 2.41. It costs the 64-bit packages their installability on Debian 12,
+Raspberry Pi OS bookworm and Ubuntu ≤ 24.10 (2.39), and buys one distribution
+to reason about — one glibc floor, one set of package names, one set of
+headers behind `alsa-sys`' probe — instead of a split that only armhf actually
+needed.
+
 The desktop `qbz` binary is out of scope here: its generated `qbz_ui` crate is
 one ~1.6M-line module needing ~30 GB for a single `rustc`. `qbzd` is the
 Slint-free column of the workspace — 381 crates whose entire native surface is
@@ -101,28 +151,42 @@ aarch64 only, so nothing there exercises 32-bit portability:
 
 - `0002-tls-use-the-system-openssl-instead-of-a-bundled-crypto-stack.patch` —
   moves reqwest and tokio-tungstenite to native-tls, because no rustls provider
-  can produce an ARMv6 binary (see above). Several declarations, since cargo
+  can produce an ARMv6 binary (see above). Four declarations, since cargo
   features are additive and one crate asking for rustls pulls it back in — the
-  workspace entry, `qbz-integrations` (which declares its own reqwest), and
-  `qconnect-transport-ws`. `Cargo.lock` is in the patch because the build runs
-  `--locked`. Upstream documents native-tls as the intended escape hatch in
+  workspace entry, `qbz-integrations` (which declares its own reqwest),
+  `qconnect-transport-ws`, and the aws-lc-rs provider `qbz-app` installs.
+  Upstream documents native-tls as the intended escape hatch in
   `qbz-qobuz/src/cmaf.rs`, and the Tauri build used it.
 
   Bundled crypto also bypasses distro security updates: a flaw in ring would
   mean rebuilding and republishing, whereas the system libssl is fixed by
   `apt upgrade`.
+- `0003-alsa-take-the-time64-timespec-fix-cpal-and-rodio-from-git.patch` — moves
+  the graph onto the time64 `timespec` fix (see above). `alsa-sys` 0.6.1 and
+  `alsa` 0.12.1 carry it and are on crates.io, so they are version requirements;
+  `cpal` is still pinned to the revision of
+  [cpal#1285](https://github.com/RustAudio/cpal/pull/1285), which is open. rodio
+  is pinned with it only because it is what accepts cpal 0.18, and
+  `links = "alsa"` forbids two `alsa-sys` copies in one graph, so the chain
+  moves as a whole.
+
+Both carry `Cargo.lock`, because the build runs `--locked`.
 
 Patches are applied on **every** arch: 0002 is a packaging choice wanted
-everywhere, so scoping it to armhf would only mean shipping three binaries built
-from two different sources, and it would leave the 64-bit packages declaring a
-`libssl3` dependency they do not link.
+everywhere, and 0003 is the same dependency graph everywhere. Scoping either to
+armhf would only mean shipping three binaries built from two different sources,
+and for 0002 it would leave the 64-bit packages declaring a `libssl3` dependency
+they do not link.
 
 A patch that no longer applies **fails the build** rather than being skipped —
 that means either upstream fixed it (delete the patch) or the code moved
-(rewrite it). The one benign case, the change already being present upstream, is
-detected by a reverse-apply check and skipped with a log line. Since every arch
-applies every patch, a stale one surfaces in the 4-minute amd64 job rather than
-hours into the emulated armhf build.
+(rewrite it). A reverse-apply check recognises the benign case, upstream having
+taken the change verbatim, and skips it with a log line; it does not recognise a
+reformulation, which is how the `alsa::pcm::Frames` patch left this directory —
+upstream merged it as `as Frames` with an import, so the check saw neither an
+applicable nor an applied patch. Since every arch applies every patch, a stale
+one surfaces in the 4-minute amd64 job rather than hours into the emulated armhf
+build.
 
 ## Releasing
 
@@ -163,8 +227,11 @@ All of them run inside the builder, natively, so they need no cross tooling:
   which only an execution test answers. Verify a new armhf binary by hand with
   `qemu-arm -cpu arm1176 -L <armhf-sysroot> ./qbzd --version`, and compare
   against `-cpu cortex-a7` to tell a genuine SIGILL from an unrelated failure.
-- **glibc floor ≤ 2.36**, so one package per arch covers Raspberry Pi OS
-  bookworm *and* trixie.
+- **time_t width** (all arches, and first, so it fails in minutes rather than
+  hours into the emulated build) — `ci/abi-probe` asserts a 16-byte
+  `alsa::timespec` and then makes the ALSA call that a mismatch crashes on.
+- **glibc floor** ≤ 2.41 on every arch, matching the trixie builder base and the
+  `libc6 (>= 2.41)` the package declares.
 - **Smoke test** — `qbzd --version` actually executes on the target arch, which
   is also how the shipped shell completions are generated: from the very binary
   that goes into the package.
@@ -174,7 +241,7 @@ All of them run inside the builder, natively, so they need no cross tooling:
 ## Building locally
 
 ```bash
-git clone --depth 1 --branch v2.0.2 https://github.com/vicrodh/qbz upstream
+git clone --depth 1 --branch pre-release https://github.com/vicrodh/qbz upstream
 # only needed for armhf, and only if binfmt is not already registered:
 docker run --privileged --rm tonistiigi/binfmt --install arm
 ./scripts/build-qbzd-deb.sh --arch armhf --version 2.0.2
@@ -184,6 +251,10 @@ The checkout must live at `./upstream` — it is part of the docker build
 context. Needs docker with buildx, and `nfpm` on the host.
 
 ## Installing
+
+Debian 13 / Raspberry Pi OS trixie or newer, on all three arches: the packages
+declare `libc6 (>= 2.41)`, so apt refuses them on bookworm instead of
+installing something that would break.
 
 ```bash
 sudo apt install qbzd

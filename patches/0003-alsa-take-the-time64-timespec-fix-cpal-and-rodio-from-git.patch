@@ -1,0 +1,478 @@
+alsa: take the time64 timespec fix, cpal and rodio still from git
+
+On Debian trixie, 32-bit libasound writes a 16-byte `struct timespec`.
+`libc::timespec` stays 8 bytes on arm-unknown-linux-gnueabihf, so
+`Status::get_htstamp` writes 8 bytes past the slot its caller reserved,
+overwrites the saved lr and returns into address 0. cpal asks for that
+timestamp on every callback, so it takes the first note played.
+
+The fix spans three crates, two of them released on 2026-07-31:
+
+  alsa-sys 0.6.1       diwic/alsa-sys#20 — compiles a probe measuring
+                       sizeof(snd_htimestamp_t) against the ALSA headers and,
+                       when it is 16, defines alsa-sys' own 16-byte timespec
+                       instead of re-exporting libc's.
+  alsa 0.12.1          diwic/alsa-rs#158 — `alsa::timespec` (alsa-sys')
+                       replaces libc::timespec in pcm, rawmidi and ump.
+  RustAudio/cpal#1285  still open — bumps alsa to 0.12 and alsa-sys to 0.6,
+                       and carries timestamps as `alsa::timespec`.
+
+So the two alsa crates are plain version requirements here, and only cpal
+needs a git pin. The requirements name the patch releases: alsa 0.12.0 still
+takes its timespec from libc, and alsa-sys 0.6.0 still re-exports it.
+
+rodio is pinned only because cpal 0.18 needs it: released rodio 0.22.2 asks
+for cpal ^0.17, and `links = "alsa"` forbids two alsa-sys copies in one
+graph, so the chain has to move as a whole. rodio master still declares
+version 0.22.2, so qbz's `rodio = "0.22"` requirement is unchanged.
+
+The alternative was RUST_LIBC_UNSTABLE_GNU_TIME_BITS=64, which widens
+libc::timespec for the whole crate graph. Besides being unstable, it does not
+build here: with a time64 libc, `timespec` gains a private __pad field, and
+alsa 0.11 — what this workspace resolved — fills its timespec literals field
+by field. Upstream fixed that in 0.12 by constructing with zeroed(), which is
+another reason the bump is the way forward rather than the env var.
+
+qbz names neither timespec nor htstamp, so this is a dependency change only.
+Revs rather than branches, so a rebuild resolves the same sources.
+
+The two releases are byte-identical to the revs this patch used to pin —
+`src/` in both, plus alsa-sys' `build.rs` — so only where cargo fetches them
+changed.
+
+Verified with `cargo tree -p qbzd -e normal`: a single alsa-sys 0.6.1
+(crates.io) in the graph, alsa 0.12.1 (crates.io), cpal 0.18.1 (git), rodio
+0.22.2 (git). cpal 0.18 also brings its new PulseAudio backend into the graph
+via rodio's default features; the `pulseaudio` crate is pure Rust (no build
+script, no libpulse), so the NEEDED list is unchanged.
+
+Drop this patch once a cpal release carries #1285 and rodio requires that
+cpal; the alsa requirements then go upstream on their own.
+
+diff --git a/crates/Cargo.lock b/crates/Cargo.lock
+index a34b95b0..5ffd579e 100644
+--- a/crates/Cargo.lock
++++ b/crates/Cargo.lock
+@@ -196,9 +196,9 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+ 
+ [[package]]
+ name = "alsa"
+-version = "0.11.0"
++version = "0.12.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "812947049edcd670a82cd5c73c3661d2e58468577ba8489de58e1a73c04cbd5d"
++checksum = "d3f93573e7ddb15145d27c58c0fa0a452faad9f5452ac17ed4554ea035ea9b71"
+ dependencies = [
+  "alsa-sys",
+  "bitflags 2.13.0",
+@@ -208,10 +208,11 @@ dependencies = [
+ 
+ [[package]]
+ name = "alsa-sys"
+-version = "0.4.0"
++version = "0.6.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ad7569085a265dd3f607ebecce7458eaab2132a84393534c95b18dcbc3f31e04"
++checksum = "f0320138053ef93099f168102c37b46ac0b9c53affc56ef7696633ad5477e2be"
+ dependencies = [
++ "cc",
+  "libc",
+  "pkg-config",
+ ]
+@@ -225,7 +226,7 @@ dependencies = [
+  "android-properties",
+  "bitflags 2.13.0",
+  "cc",
+- "jni 0.22.4",
++ "jni",
+  "libc",
+  "log",
+  "ndk",
+@@ -654,6 +655,43 @@ dependencies = [
+  "zbus 5.15.0",
+ ]
+ 
++[[package]]
++name = "audio-core"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f93ebbf82d06013f4c41fe71303feb980cddd78496d904d06be627972de51a24"
++
++[[package]]
++name = "audioadapter"
++version = "3.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "91f87b70b051c5866680ad79f6743a42ccab264c009d1a71f4d33a3872ae60c8"
++dependencies = [
++ "audio-core",
++ "num-traits",
++]
++
++[[package]]
++name = "audioadapter-buffers"
++version = "3.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9097d67933fb083d382ce980430afdb758aada60846010aee6be068c06cef0ca"
++dependencies = [
++ "audioadapter",
++ "audioadapter-sample",
++ "num-traits",
++]
++
++[[package]]
++name = "audioadapter-sample"
++version = "3.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "34ab94f2bc04a14e1f49ee5f222f66460e8a1b51627bdfedf34eed394d747938"
++dependencies = [
++ "audio-core",
++ "num-traits",
++]
++
+ [[package]]
+ name = "auto_enums"
+ version = "0.8.8"
+@@ -1044,12 +1082,6 @@ dependencies = [
+  "shlex",
+ ]
+ 
+-[[package]]
+-name = "cesu8"
+-version = "1.1.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
+-
+ [[package]]
+ name = "cexpr"
+ version = "0.6.0"
+@@ -1458,9 +1490,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "coreaudio-rs"
+-version = "0.14.1"
++version = "0.14.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "16dd574a72a021b90c7656c474ea31d11a2f0366a8eff574186e761e0b9e3586"
++checksum = "7d5d7dca3ebcf65a035582c9ad4385371a9d9ee6537474d2a278f4e1e475bb58"
+ dependencies = [
+  "bitflags 2.13.0",
+  "libc",
+@@ -1478,14 +1510,15 @@ checksum = "7704b5fdd17b18ae31c4c1da5a2e0305a2bf17b5249300a9ee9ed7b72114c636"
+ 
+ [[package]]
+ name = "cpal"
+-version = "0.17.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d8942da362c0f0d895d7cac616263f2f9424edc5687364dfd1d25ef7eba506d7"
++version = "0.18.1"
++source = "git+https://github.com/RustAudio/cpal?rev=d436a42f889472692fc9126d5b4f14586135942b#d436a42f889472692fc9126d5b4f14586135942b"
+ dependencies = [
+  "alsa",
++ "block2 0.6.2",
+  "coreaudio-rs",
+  "dasp_sample",
+- "jni 0.21.1",
++ "futures",
++ "jni",
+  "js-sys",
+  "libc",
+  "mach2",
+@@ -1500,10 +1533,10 @@ dependencies = [
+  "objc2-core-audio-types",
+  "objc2-core-foundation",
+  "objc2-foundation 0.3.2",
+- "wasm-bindgen",
+- "wasm-bindgen-futures",
++ "pulseaudio",
+  "web-sys",
+  "windows 0.62.2",
++ "windows-core 0.62.2",
+ ]
+ 
+ [[package]]
+@@ -2031,6 +2064,17 @@ version = "1.1.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
+ 
++[[package]]
++name = "enum-primitive-derive"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ba7795da175654fe16979af73f81f26a8ea27638d8d9823d317016888a63dc4c"
++dependencies = [
++ "num-traits",
++ "quote",
++ "syn 2.0.117",
++]
++
+ [[package]]
+ name = "enumflags2"
+ version = "0.7.12"
+@@ -3072,7 +3116,7 @@ dependencies = [
+  "android-build",
+  "i-slint-core",
+  "i-slint-renderer-skia",
+- "jni 0.22.4",
++ "jni",
+  "raw-window-handle",
+ ]
+ 
+@@ -3807,22 +3851,6 @@ dependencies = [
+  "syn 2.0.117",
+ ]
+ 
+-[[package]]
+-name = "jni"
+-version = "0.21.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1a87aa2bb7d2af34197c04845522473242e1aa17c12f4935d5856491a7fb8c97"
+-dependencies = [
+- "cesu8",
+- "cfg-if",
+- "combine",
+- "jni-sys 0.3.0",
+- "log",
+- "thiserror 1.0.69",
+- "walkdir",
+- "windows-sys 0.45.0",
+-]
+-
+ [[package]]
+ name = "jni"
+ version = "0.22.4"
+@@ -4006,9 +4034,9 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
+ 
+ [[package]]
+ name = "libc"
+-version = "0.2.183"
++version = "0.2.189"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
++checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+ 
+ [[package]]
+ name = "libdbus-sys"
+@@ -4272,12 +4300,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "mach2"
+-version = "0.5.0"
++version = "0.6.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "6a1b95cd5421ec55b445b5ae102f5ea0e768de1f82bd3001e11f426c269c3aea"
+-dependencies = [
+- "libc",
+-]
++checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
+ 
+ [[package]]
+ name = "malloc_buf"
+@@ -4834,6 +4859,7 @@ version = "0.3.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
+ dependencies = [
++ "bitflags 2.13.0",
+  "objc2 0.6.4",
+  "objc2-foundation 0.3.2",
+ ]
+@@ -5591,9 +5617,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "pkg-config"
+-version = "0.3.32"
++version = "0.3.33"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
++checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+ 
+ [[package]]
+ name = "plain"
+@@ -5899,6 +5925,22 @@ version = "0.11.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
+ 
++[[package]]
++name = "pulseaudio"
++version = "0.3.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d70623bd7967a9ca4c2ae0e807fc380b291f98480fc037042305ec643a4d3373"
++dependencies = [
++ "bitflags 2.13.0",
++ "byteorder",
++ "enum-primitive-derive",
++ "futures",
++ "log",
++ "mio",
++ "num-traits",
++ "thiserror 1.0.69",
++]
++
+ [[package]]
+ name = "pure-rust-locales"
+ version = "0.8.2"
+@@ -6672,16 +6714,6 @@ version = "0.10.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0c8d0fd677905edcbeedbf2edb6494d676f0e98d54d5cf9bda0b061cb8fb8aba"
+ 
+-[[package]]
+-name = "rand_distr"
+-version = "0.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4d431c2703ccf129de4d45253c03f49ebb22b97d6ad79ee3ecfc7e3f4862c1d8"
+-dependencies = [
+- "num-traits",
+- "rand 0.10.1",
+-]
+-
+ [[package]]
+ name = "range-alloc"
+ version = "0.1.5"
+@@ -7092,15 +7124,12 @@ dependencies = [
+ [[package]]
+ name = "rodio"
+ version = "0.22.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d0a536bb79db59098ef71a4dd4246c02eb87b316deceb1b68e0cde7167ec01eb"
++source = "git+https://github.com/RustAudio/rodio?rev=c5f1e94290922fe4ee963ce6f85754ea6ba36243#c5f1e94290922fe4ee963ce6f85754ea6ba36243"
+ dependencies = [
+  "cpal",
+  "dasp_sample",
+- "num-rational",
+- "rand 0.10.1",
+- "rand_distr",
+  "rtrb",
++ "rubato",
+  "symphonia",
+  "thiserror 2.0.18",
+ ]
+@@ -7151,6 +7180,20 @@ version = "0.3.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7204ed6420f698836b76d4d5c2ec5dec7585fd5c3a788fd1cde855d1de598239"
+ 
++[[package]]
++name = "rubato"
++version = "3.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d4be9c88e3d722d3d36939e41941f6b6f52810c1235bf19998a7d4535b402892"
++dependencies = [
++ "audioadapter",
++ "audioadapter-buffers",
++ "num-integer",
++ "num-traits",
++ "visibility",
++ "windowfunctions",
++]
++
+ [[package]]
+ name = "rupnp"
+ version = "3.0.0"
+@@ -8166,6 +8209,7 @@ dependencies = [
+  "bytemuck",
+  "lazy_static",
+  "log",
++ "rustfft",
+ ]
+ 
+ [[package]]
+@@ -9164,6 +9208,17 @@ version = "0.9.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+ 
++[[package]]
++name = "visibility"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d674d135b4a8c1d7e813e2f8d1c9a58308aee4a680323066025e53132218bd91"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.117",
++]
++
+ [[package]]
+ name = "vtable"
+ version = "0.4.0"
+@@ -9507,7 +9562,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0fc95580916af1e68ff6a7be07446fc5db73ebf71cf092de939bbf5f7e189f72"
+ dependencies = [
+  "core-foundation 0.10.1",
+- "jni 0.22.4",
++ "jni",
+  "log",
+  "ndk-context",
+  "objc2 0.6.4",
+@@ -9787,6 +9842,15 @@ version = "0.4.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+ 
++[[package]]
++name = "windowfunctions"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "90628d739333b7c5d2ee0b70210b97b8cddc38440c682c96fd9e2c24c2db5f3a"
++dependencies = [
++ "num-traits",
++]
++
+ [[package]]
+ name = "windows"
+ version = "0.44.0"
+@@ -9977,15 +10041,6 @@ dependencies = [
+  "windows-link 0.2.1",
+ ]
+ 
+-[[package]]
+-name = "windows-sys"
+-version = "0.45.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "75283be5efb2831d37ea142365f009c02ec203cd29a3ebecbc093d52315b66d0"
+-dependencies = [
+- "windows-targets 0.42.2",
+-]
+-
+ [[package]]
+ name = "windows-sys"
+ version = "0.48.0"
+diff --git a/crates/Cargo.toml b/crates/Cargo.toml
+index 53f0bf60..22e66f33 100644
+--- a/crates/Cargo.toml
++++ b/crates/Cargo.toml
+@@ -104,6 +104,17 @@ strsim = "0.11"
+ strip = "symbols"
+ 
+ [patch.crates-io]
++# 32-bit time64: on Debian trixie libasound writes a 16-byte struct timespec,
++# while libc::timespec stays 8 bytes on arm-unknown-linux-gnueabihf, so
++# Status::get_htstamp overruns the frame of whoever called it. alsa-sys 0.6.1
++# grew its own 16-byte timespec and alsa 0.12.1 uses it in place of libc's;
++# both are released, so qbz-audio just asks for them by version. cpal has not
++# followed yet (RustAudio/cpal#1285), and rodio is pinned only because its
++# master is what accepts cpal 0.18 — one alsa-sys has to serve the whole graph
++# (links = "alsa"), so the chain moves as a whole. Drop both once cpal
++# releases and rodio requires that release.
++cpal = { git = "https://github.com/RustAudio/cpal", rev = "d436a42f889472692fc9126d5b4f14586135942b" }
++rodio = { git = "https://github.com/RustAudio/rodio", rev = "c5f1e94290922fe4ee963ce6f85754ea6ba36243" }
+ # Slint 1.16's femtovg-wgpu renderer leaves the wgpu surface alpha mode at
+ # `Auto`, which resolves as an opaque compositor surface on KWin/Wayland and
+ # makes borderless transparent windows show a black rectangular backing. The
+diff --git a/crates/qbz-audio/Cargo.toml b/crates/qbz-audio/Cargo.toml
+index 93cbbd34..9a3856e9 100644
+--- a/crates/qbz-audio/Cargo.toml
++++ b/crates/qbz-audio/Cargo.toml
+@@ -45,11 +45,13 @@ ringbuf = "0.4"
+ 
+ [target.'cfg(target_os = "linux")'.dependencies]
+ # ALSA for direct hardware access (bit-perfect)
+-alsa = "0.11"
++# 0.12.1, not 0.12: the time64 timespec fix landed in the patch release.
++alsa = "0.12.1"
+ # alsa-sys: direct FFI for snd_lib_error_set_handler (custom error routing).
+-# Kept in lockstep with alsa (0.11 -> alsa-sys 0.4); a single alsa-sys is
++# Kept in lockstep with alsa (0.12 -> alsa-sys 0.6); a single alsa-sys is
+ # required because of the `links = "alsa"` constraint shared with cpal.
+-alsa-sys = "0.4"
++# 0.6.1 is where its own 16-byte timespec appeared.
++alsa-sys = "0.6.1"
+ # zbus for org.freedesktop.ReserveDevice1 D-Bus client (device reservation).
+ # Pinned to v4 to share the transitive copy already pulled in by
+ # secret-service/souvlaki and avoid duplicate zbus compiles.

@@ -2,3 +2,4 @@ dist/
 **/.git
 upstream/docs/
 upstream/.github/
+ci/abi-probe/target/

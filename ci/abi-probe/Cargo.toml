@@ -1,0 +1,14 @@
+[package]
+name = "abi-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# What patches/0003 makes qbz-audio ask for: the first releases whose timespec
+# is alsa-sys' own 16-byte one rather than libc's.
+alsa = "0.12.1"
+libc = "0.2"
+
+# Standalone: the probe is built on its own, outside the upstream workspace.
+[workspace]

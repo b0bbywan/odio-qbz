@@ -44,6 +44,9 @@ done
 [ -n "${ARCH}" ]    || die "--arch is required"
 [ -n "${VERSION}" ] || die "--version is required"
 
+# Every arch builds on trixie, so they share one floor; the glibc-floor gate in
+# the builder is what keeps LIBC_MIN honest.
+LIBC_MIN="2.41"
 case "${ARCH}" in
   amd64) PLATFORM="linux/amd64"  ;;
   arm64) PLATFORM="linux/arm64"  ;;
@@ -90,7 +93,7 @@ echo "--- nfpm"
 DEB="${OUT}/qbzd_${VERSION}_${ARCH}.deb"
 # nfpm resolves contents[].src relative to the CWD.
 ( cd "${STAGE}" \
-  && QBZD_ARCH="${ARCH}" QBZD_VERSION="${VERSION}" \
+  && QBZD_ARCH="${ARCH}" QBZD_VERSION="${VERSION}" QBZD_LIBC_MIN="${LIBC_MIN}" \
      nfpm package -f "${REPO_ROOT}/packaging/nfpm.yaml" -p deb -t "${DEB}" )
 
 echo "--- package"

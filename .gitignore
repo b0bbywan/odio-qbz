@@ -2,3 +2,7 @@ dist/
 upstream/
 *.deb
 *.core
+
+# The probe deliberately floats its dependencies, so it has no committed lock.
+ci/abi-probe/target/
+ci/abi-probe/Cargo.lock

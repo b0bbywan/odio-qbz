@@ -4,12 +4,16 @@
 # already that arch. Same shape as b0bbywan/spotifyd's .github/Dockerfile.linux.
 # See the README for why armhf is not cross-compiled.
 #
-# bookworm keeps the glibc floor at 2.36 (Pi OS bookworm and trixie). armv6 has
-# no Debian port, hence the pinned Raspberry Pi OS rootfs
-# (https://github.com/vascoguita/raspios-docker) — same pin spotifyd uses.
-FROM --platform=linux/amd64  debian:bookworm-slim AS base-amd64
-FROM --platform=linux/arm64  debian:bookworm-slim AS base-arm64
-FROM --platform=linux/arm/v6 vascoguita/raspios:armhf-bookworm-2025-05-13@sha256:38b812d3a83a9760f9c208d96aa55156ba56fed35a3f41d063bcbe9f00c54639 AS base-armv6
+# trixie everywhere, so the three arches share one distribution and one glibc
+# floor (2.41). armhf has no choice in the matter — Debian's 64-bit time_t
+# transition landed in trixie and one package cannot serve both sides of it —
+# and building the 64-bit arches on bookworm to keep their floor at 2.36 only
+# bought a lower floor at the price of two rootfs. armv6 has no Debian port,
+# hence the pinned Raspberry Pi OS rootfs
+# (https://github.com/vascoguita/raspios-docker).
+FROM --platform=linux/amd64  debian:trixie-slim AS base-amd64
+FROM --platform=linux/arm64  debian:trixie-slim AS base-arm64
+FROM --platform=linux/arm/v6 vascoguita/raspios:armhf-trixie-2026-06-19@sha256:89416baadb6cdb75c874fa696bcf51ab47d76b217fea9b635c86c61083b84d52 AS base-armv6
 
 # ── Builder ────────────────────────────────────────────────────────────────
 ARG TARGETARCH
@@ -43,14 +47,26 @@ RUN set -eux; \
                  --default-host "$RUST_HOST"
 ENV PATH="/root/.cargo/bin:$PATH"
 
+# Before the workspace, so an ABI mismatch fails in minutes instead of hours
+# into the emulated build.
+COPY ci/abi-probe/ /probe/
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/probe/target,id=probe-${TARGETARCH}${TARGETVARIANT} \
+    set -eux; \
+    echo "=== gate: time_t ABI ==="; \
+    dpkg -S "$(readlink -f /usr/lib/*/libasound.so.2)" || true; \
+    cargo run --release --manifest-path /probe/Cargo.toml
+
 WORKDIR /build
 COPY upstream/ /build/
 COPY patches/ /patches/
 
-# Applied on every arch: 0002 is a packaging choice we want everywhere, so
-# scoping it to armhf would only mean shipping three binaries built from two
-# different sources. A patch that no longer applies is a hard failure; already
-# being present upstream is caught by the reverse-apply test.
+# Applied on every arch: 0002 is a packaging choice we want everywhere, and
+# 0003 pins the same dependency graph for all of them — scoping either to armhf
+# would only mean shipping three binaries built from two different sources.
+# A patch that no longer applies is a hard failure. The reverse-apply test only
+# recognises a fix upstream took verbatim; a reformulated one lands here too,
+# which is the right place to notice it.
 RUN set -eux; \
     for p in /patches/*.patch; do \
       [ -f "$p" ] || continue; \
@@ -65,10 +81,19 @@ RUN set -eux; \
       fi; \
     done
 
+# The git db lives on tmpfs — this is the only step with git dependencies,
+# patches/0003's cpal and rodio pins: cargo's vendored libgit2 compiles its C
+# without _FILE_OFFSET_BITS=64, so on a 32-bit target readdir() fails with
+# EOVERFLOW on the entry offsets overlayfs hands out. The armhf job could not
+# read the db it had just cloned, and fetching with the system git only moved
+# the failure into the packfile it left behind. tmpfs numbers entries
+# sequentially. Every arch, because one code path beats persisting a clone of
+# two small repositories.
+#
 # One RUN: /build/crates/target is a cache mount, so nothing under it survives
 # into the layer.
 RUN --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=tmpfs,target=/root/.cargo/git \
     --mount=type=cache,target=/build/crates/target \
     set -eux; \
     \
@@ -99,11 +124,12 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
       esac; \
     fi; \
     \
-    echo "=== gate: glibc floor <= 2.36 ==="; \
+    ceiling=GLIBC_2.41; \
+    echo "=== gate: glibc floor <= ${ceiling#GLIBC_} ==="; \
     floor="$(objdump -T /out/qbzd | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1)"; \
     echo "glibc floor: ${floor:-none}"; \
-    if [ -n "$floor" ] && [ "$(printf '%s\n%s\n' "$floor" GLIBC_2.36 | sort -V | tail -1)" != "GLIBC_2.36" ]; then \
-      echo "ERROR: glibc floor $floor exceeds 2.36" >&2; exit 1; \
+    if [ -n "$floor" ] && [ "$(printf '%s\n%s\n' "$floor" "$ceiling" | sort -V | tail -1)" != "$ceiling" ]; then \
+      echo "ERROR: glibc floor $floor exceeds ${ceiling#GLIBC_}" >&2; exit 1; \
     fi; \
     \
     echo "=== shared libraries required (cross-check packaging/nfpm.yaml) ==="; \

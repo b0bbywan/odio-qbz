@@ -1,8 +1,9 @@
 # qbzd — daemon-only .deb. Upstream's own nfpm config ships the Slint binary in
 # the same package; see the README for the comparison.
 #
-# Env from scripts/build-qbzd-deb.sh: QBZD_VERSION, QBZD_ARCH. contents[].src
-# are relative — nfpm runs from the staging dir, so src needs no interpolation.
+# Env from scripts/build-qbzd-deb.sh: QBZD_VERSION, QBZD_ARCH, QBZD_LIBC_MIN.
+# contents[].src are relative — nfpm runs from the staging dir, so src needs no
+# interpolation.
 
 name: qbzd
 arch: ${QBZD_ARCH}
@@ -46,13 +47,16 @@ overrides:
   deb:
     depends:
       # Measured NEEDED set: libasound, libc, libgcc_s, libm. The builder prints
-      # it on every build. t64 covers Ubuntu 24.04+'s time_t64 renames;
-      # PipeWire is reached through its ALSA shim.
-      - libasound2 | libasound2t64
-      # The builder's bookworm baseline, enforced by the glibc-floor gate.
-      - libc6 (>= 2.36)
-      # patches/0002 links the system OpenSSL; t64 covers trixie's rename.
-      - libssl3 | libssl3t64
+      # it on every build. PipeWire is reached through its ALSA shim. The t64
+      # name is Debian's 64-bit time_t rename and is what every build target
+      # ships; the old name stays as an alternative for derivatives that kept
+      # it — it is a name, not a compatibility guard.
+      - libasound2t64 | libasound2
+      # The only thing that actually keeps a package off the release it was not
+      # built for. Every arch builds on trixie, so it is 2.41 for all three.
+      - libc6 (>= ${QBZD_LIBC_MIN})
+      # patches/0002 links the system OpenSSL.
+      - libssl3t64 | libssl3
     recommends:
       # MPRIS over D-Bus (zbus, so no link-time dep); missing it just disables
       # media-control integration.
