@@ -1,0 +1,392 @@
+tls: use the system OpenSSL instead of a bundled crypto stack
+
+rustls delegates crypto to a provider, and BOTH providers — ring and
+aws-lc-rs — ship the same OpenSSL-derived ARM assembly, which emits
+`.arch armv7-a` under a guard that is always true for a 32-bit ARM ELF
+build. The directive overrides -march, so no compiler flag and no rootfs
+avoids it, and it enables Thumb-2 encodings. Measured with
+`qemu-arm -cpu arm1176`: the binary dies on `mov.w`, which ARMv6Z does not
+implement, while the same binary runs under `-cpu cortex-a7`. Swapping ring
+for aws-lc-rs does not help; aws-lc-sys carries the same 20 asm files, and
+AWS_LC_SYS_NO_ASM panics outside debug builds.
+
+native-tls links the system libssl instead, so no crypto assembly is built
+into the binary at all — the shared library on the target is whatever the
+distribution compiled, which on Raspberry Pi OS armhf is ARMv6. This is how
+spotifyd and myMPD both ship working v6 binaries: their NEEDED lists show
+libssl.so.3. It is also what Debian prefers to a vendored crypto stack, and
+it means a libssl flaw is fixed by `apt upgrade` instead of by rebuilding.
+
+Not fighting an upstream decision: the Tauri build used `.use_native_tls()`,
+and qbz-qobuz/src/cmaf.rs documents adding the native-tls feature as the
+intended escape hatch. No `.use_native_tls()` call is needed — with
+default-features off and only native-tls enabled, it is reqwest's only
+backend.
+
+Four declarations, since cargo features are additive and one crate asking
+for rustls would pull it back in. PR #663 (fengalin) moved reqwest to
+`rustls-tls-webpki-roots-no-provider` and installs an aws-lc-rs provider
+from qbz-app, which leaves BOTH providers in the graph: aws-lc-sys through
+that provider, and ring through qconnect-transport-ws's tokio-tungstenite,
+which the PR did not touch. So the provider declaration and its two call
+sites go too — with native-tls there is nothing to install.
+
+Verified on the pre-release branch: `cargo tree -p qbzd -e normal` resolves
+no ring, no aws-lc-sys and no rustls, and reaches openssl-sys through
+native-tls. Cargo.lock is included because the build runs --locked.
+
+diff --git a/crates/Cargo.lock b/crates/Cargo.lock
+index 64aa5fa..a34b95b 100644
+--- a/crates/Cargo.lock
++++ b/crates/Cargo.lock
+@@ -3025,20 +3025,19 @@ dependencies = [
+ ]
+ 
+ [[package]]
+-name = "hyper-rustls"
+-version = "0.27.7"
++name = "hyper-tls"
++version = "0.6.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e3c93eb611681b207e1fe55d5a71ecf91572ec8a6705cdb6857f7d8d5242cf58"
++checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
+ dependencies = [
+- "http",
++ "bytes",
++ "http-body-util",
+  "hyper",
+  "hyper-util",
+- "rustls",
+- "rustls-pki-types",
++ "native-tls",
+  "tokio",
+- "tokio-rustls",
++ "tokio-native-tls",
+  "tower-service",
+- "webpki-roots 1.0.6",
+ ]
+ 
+ [[package]]
+@@ -4489,6 +4488,23 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
++[[package]]
++name = "native-tls"
++version = "0.2.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "87de3442987e9dbec73158d5c715e7ad9072fda936bb03d19d7fa10e00520f0e"
++dependencies = [
++ "libc",
++ "log",
++ "openssl",
++ "openssl-probe 0.1.6",
++ "openssl-sys",
++ "schannel",
++ "security-framework 2.11.1",
++ "security-framework-sys",
++ "tempfile",
++]
++
+ [[package]]
+ name = "natord"
+ version = "1.0.9"
+@@ -5205,12 +5221,56 @@ dependencies = [
+  "pathdiff",
+ ]
+ 
++[[package]]
++name = "openssl"
++version = "0.10.74"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "24ad14dd45412269e1a30f52ad8f0664f0f4f4a89ee8fe28c3b3527021ebb654"
++dependencies = [
++ "bitflags 2.13.0",
++ "cfg-if",
++ "foreign-types 0.3.2",
++ "libc",
++ "once_cell",
++ "openssl-macros",
++ "openssl-sys",
++]
++
++[[package]]
++name = "openssl-macros"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.117",
++]
++
++[[package]]
++name = "openssl-probe"
++version = "0.1.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
++
+ [[package]]
+ name = "openssl-probe"
+ version = "0.2.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+ 
++[[package]]
++name = "openssl-sys"
++version = "0.9.110"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0a9f0075ba3c21b09f8e8b2026584b1d18d49388648f2fbbf3c97ea8deced8e2"
++dependencies = [
++ "cc",
++ "libc",
++ "pkg-config",
++ "vcpkg",
++]
++
+ [[package]]
+ name = "option-ext"
+ version = "0.2.0"
+@@ -5933,7 +5993,6 @@ dependencies = [
+  "rand 0.10.1",
+  "reqwest",
+  "rusqlite",
+- "rustls",
+  "serde",
+  "serde_json",
+  "tokio",
+@@ -6930,20 +6989,20 @@ dependencies = [
+  "http-body",
+  "http-body-util",
+  "hyper",
+- "hyper-rustls",
++ "hyper-tls",
+  "hyper-util",
+  "js-sys",
+  "log",
++ "native-tls",
+  "percent-encoding",
+  "pin-project-lite",
+- "rustls",
+  "rustls-pki-types",
+  "serde",
+  "serde_json",
+  "serde_urlencoded",
+  "sync_wrapper",
+  "tokio",
+- "tokio-rustls",
++ "tokio-native-tls",
+  "tokio-util",
+  "tower",
+  "tower-http",
+@@ -6953,7 +7012,6 @@ dependencies = [
+  "wasm-bindgen-futures",
+  "wasm-streams",
+  "web-sys",
+- "webpki-roots 1.0.6",
+ ]
+ 
+ [[package]]
+@@ -7226,10 +7284,10 @@ version = "0.8.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "612460d5f7bea540c490b2b6395d8e34a953e52b491accd6c86c8164c5932a63"
+ dependencies = [
+- "openssl-probe",
++ "openssl-probe 0.2.1",
+  "rustls-pki-types",
+  "schannel",
+- "security-framework",
++ "security-framework 3.7.0",
+ ]
+ 
+ [[package]]
+@@ -7351,6 +7409,19 @@ dependencies = [
+  "zbus 4.4.0",
+ ]
+ 
++[[package]]
++name = "security-framework"
++version = "2.11.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
++dependencies = [
++ "bitflags 2.13.0",
++ "core-foundation 0.9.4",
++ "core-foundation-sys",
++ "libc",
++ "security-framework-sys",
++]
++
+ [[package]]
+ name = "security-framework"
+ version = "3.7.0"
+@@ -8592,12 +8663,12 @@ dependencies = [
+ ]
+ 
+ [[package]]
+-name = "tokio-rustls"
+-version = "0.26.4"
++name = "tokio-native-tls"
++version = "0.3.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
++checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
+ dependencies = [
+- "rustls",
++ "native-tls",
+  "tokio",
+ ]
+ 
+@@ -8621,12 +8692,10 @@ checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+ dependencies = [
+  "futures-util",
+  "log",
+- "rustls",
+- "rustls-pki-types",
++ "native-tls",
+  "tokio",
+- "tokio-rustls",
++ "tokio-native-tls",
+  "tungstenite",
+- "webpki-roots 0.26.11",
+ ]
+ 
+ [[package]]
+@@ -8828,9 +8897,8 @@ dependencies = [
+  "http",
+  "httparse",
+  "log",
++ "native-tls",
+  "rand 0.8.6",
+- "rustls",
+- "rustls-pki-types",
+  "sha1",
+  "thiserror 1.0.69",
+  "utf-8",
+@@ -9448,24 +9516,6 @@ dependencies = [
+  "web-sys",
+ ]
+ 
+-[[package]]
+-name = "webpki-roots"
+-version = "0.26.11"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+-dependencies = [
+- "webpki-roots 1.0.6",
+-]
+-
+-[[package]]
+-name = "webpki-roots"
+-version = "1.0.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "22cfaf3c063993ff62e73cb4311efde4db1efb31ab78a3e5c457939ad5cc0bed"
+-dependencies = [
+- "rustls-pki-types",
+-]
+-
+ [[package]]
+ name = "weezl"
+ version = "0.1.12"
+diff --git a/crates/Cargo.toml b/crates/Cargo.toml
+index 4b7fec0..53f0bf6 100644
+--- a/crates/Cargo.toml
++++ b/crates/Cargo.toml
+@@ -59,7 +59,7 @@ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+ 
+ # HTTP
+-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider", "cookies", "stream"] }
++reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "cookies", "stream"] }
+ 
+ # Logging
+ log = "0.4"
+diff --git a/crates/qbz-app/Cargo.toml b/crates/qbz-app/Cargo.toml
+index 2e5ff6e..73ac5e8 100644
+--- a/crates/qbz-app/Cargo.toml
++++ b/crates/qbz-app/Cargo.toml
+@@ -25,5 +25,3 @@ md-5 = { workspace = true }
+ base64 = { workspace = true }
+ rand = "0.10"
+ 
+-# TLS provider selection
+-rustls = { version = "0.23", features = ["aws_lc_rs"] }
+diff --git a/crates/qbz-app/src/lib.rs b/crates/qbz-app/src/lib.rs
+index 56e5084..9e37578 100644
+--- a/crates/qbz-app/src/lib.rs
++++ b/crates/qbz-app/src/lib.rs
+@@ -10,20 +10,3 @@ pub mod session_store;
+ pub mod shell;
+ pub mod settings;
+ pub mod user_data;
+-
+-/// Install the rustls process-level `CryptoProvider` (aws-lc-rs) exactly once.
+-///
+-/// Idempotent (a second call is a no-op); harmless if some other component
+-/// already installed a default (`install_default` then returns Err, ignored).
+-pub fn ensure_crypto_provider() {
+-    use std::sync::Once;
+-    static INIT: Once = Once::new();
+-    INIT.call_once(|| {
+-        if rustls::crypto::aws_lc_rs::default_provider()
+-            .install_default()
+-            .is_err()
+-        {
+-            log::debug!("[app] rustls CryptoProvider already installed");
+-        }
+-    });
+-}
+diff --git a/crates/qbz-integrations/Cargo.toml b/crates/qbz-integrations/Cargo.toml
+index ae26fb9..9497c93 100644
+--- a/crates/qbz-integrations/Cargo.toml
++++ b/crates/qbz-integrations/Cargo.toml
+@@ -10,7 +10,7 @@ license = "MIT"
+ tokio = { version = "1", features = ["sync", "time"] }
+ 
+ # HTTP client
+-reqwest = { workspace = true, default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider"] }
++reqwest = { workspace = true, default-features = false, features = ["json", "native-tls"] }
+ 
+ # Serialization
+ serde = { version = "1", features = ["derive"] }
+diff --git a/crates/qbz/src/main.rs b/crates/qbz/src/main.rs
+index 747ce77..4f33847 100644
+--- a/crates/qbz/src/main.rs
++++ b/crates/qbz/src/main.rs
+@@ -8120,9 +8120,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+     // Large/XL (and shrink RAM at Small). Set before any artwork job runs.
+     crate::artwork::set_ui_scale_factor(ui_scale_factor);
+ 
+-    // Install the rustls process-level `CryptoProvider`
+-    qbz_app::ensure_crypto_provider();
+-
+     let tokio_rt = tokio::runtime::Runtime::new()?;
+     let _enter = tokio_rt.enter();
+ 
+diff --git a/crates/qbzd/src/main.rs b/crates/qbzd/src/main.rs
+index 9f7ba40..a4285f2 100644
+--- a/crates/qbzd/src/main.rs
++++ b/crates/qbzd/src/main.rs
+@@ -256,9 +256,6 @@ enum ConfigCmd { Path, Show { #[arg(long)] json: bool } }
+ 
+ #[tokio::main]
+ async fn main() {
+-    // Install the rustls process-level `CryptoProvider`
+-    qbz_app::ensure_crypto_provider();
+-
+     let cli = Cli::parse();
+     let code = match cli.cmd {
+         Cmd::Version { json } => {
+diff --git a/crates/qconnect-transport-ws/Cargo.toml b/crates/qconnect-transport-ws/Cargo.toml
+index d6cd727..ae45604 100644
+--- a/crates/qconnect-transport-ws/Cargo.toml
++++ b/crates/qconnect-transport-ws/Cargo.toml
+@@ -12,6 +12,6 @@ tokio = { workspace = true }
+ serde = { workspace = true }
+ thiserror = { workspace = true }
+ futures-util = { workspace = true }
+-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
++tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+ prost = "0.13"
+ log = "0.4"
