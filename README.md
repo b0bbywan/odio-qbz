@@ -211,6 +211,14 @@ the GitHub Release as a prerelease, and dispatches a rebuild of
 `watch-upstream.yml` polls `vicrodh/qbz` daily and pushes the tag by itself
 when a new upstream release appears.
 
+Until the 32-bit fixes reach a tag, `patches/` is written against upstream's
+`pre-release` branch: that is the `UPSTREAM_DEV_REF` a branch push builds, and
+`workflow_dispatch` takes any ref plus an explicit version:
+
+```bash
+gh workflow run build.yml -f upstream_ref=pre-release -f version=2.0.2+pre.1
+```
+
 ## Build gates
 
 Every arch fails the build loudly rather than shipping a subtly broken daemon.

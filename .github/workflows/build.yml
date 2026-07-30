@@ -3,18 +3,26 @@ name: Build
 on:
   push:
     tags: ['v*']
-    # Branch pushes build against the latest upstream release and publish
-    # nothing — the release/dispatch jobs are tag-only. This is how the
-    # pipeline gets exercised before a tag is cut.
+    # Branch pushes build UPSTREAM_DEV_REF and publish nothing — the
+    # release/dispatch jobs are tag-only. This is how the pipeline gets
+    # exercised before a tag is cut.
     branches: ['**']
   workflow_dispatch:
     inputs:
-      upstream_tag:
-        description: 'Upstream qbz tag to build (e.g. v2.0.2)'
+      upstream_ref:
+        description: 'Upstream qbz ref to build — tag, branch or sha (e.g. v2.0.2, pre-release)'
         required: true
+      version:
+        description: 'Package version; required unless the ref is a vX.Y.Z tag'
+        required: false
 
 permissions:
   contents: read
+
+env:
+  # What patches/ is written against, and therefore what a branch push builds.
+  # The 32-bit fixes live on this branch, not in any tag yet.
+  UPSTREAM_DEV_REF: pre-release
 
 jobs:
   build:
@@ -49,43 +57,51 @@ jobs:
       - name: Checkout this repo
         uses: actions/checkout@v5
 
-      - name: Resolve upstream tag
+      - name: Resolve upstream ref
         id: upstream
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           case "${{ github.event_name }}" in
             workflow_dispatch)
-              # github.ref_name is a branch here, so the version has to come
-              # from the requested upstream tag.
-              LOCAL_TAG="${{ github.event.inputs.upstream_tag }}"
+              REF="${{ github.event.inputs.upstream_ref }}"
+              VERSION="${{ github.event.inputs.version }}"
               ;;
             *)
               if [ "${{ github.ref_type }}" = "tag" ]; then
-                LOCAL_TAG="${{ github.ref_name }}"
+                REF="${{ github.ref_name }}"
               else
-                # Branch push: nothing is published, so build whatever upstream
-                # is current and mark the version as a CI build.
-                LOCAL_TAG="$(gh release view --repo vicrodh/qbz --json tagName --jq .tagName)"
-                CI_SUFFIX="+ci.$(git rev-parse --short HEAD)"
+                # Branch push: nothing is published, so build the ref patches/
+                # targets and mark the version as a CI build. 0.0.0 sorts below
+                # every real release, in case one ever escapes as an artifact.
+                REF="${UPSTREAM_DEV_REF}"
+                VERSION="0.0.0+ci.$(git rev-parse --short HEAD)"
               fi
               ;;
           esac
-          # Strip prerelease suffix so e.g. v2.0.2-rc1 builds upstream v2.0.2
-          TAG="$(echo "${LOCAL_TAG}" | sed -E 's/-(rc|beta|alpha)[0-9]*$//')"
-          # Debian version: tilde so a prerelease sorts BELOW the final
-          # release (2.0.2~rc1 < 2.0.2), unlike a dash-revision.
-          VERSION="$(echo "${LOCAL_TAG}" | sed -E 's/^v//; s/-(rc|beta|alpha)/~\1/')${CI_SUFFIX:-}"
-          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          if [ -z "${VERSION}" ]; then
+            case "${REF}" in
+              # Strip the prerelease suffix so v2.0.2-rc1 builds upstream
+              # v2.0.2, and tilde it in the version so 2.0.2~rc1 sorts BELOW
+              # 2.0.2, unlike a dash-revision.
+              v[0-9]*)
+                VERSION="$(echo "${REF}" | sed -E 's/^v//; s/-(rc|beta|alpha)/~\1/')"
+                REF="$(echo "${REF}" | sed -E 's/-(rc|beta|alpha)[0-9]*$//')"
+                ;;
+              *)
+                echo "::error::${REF} is not a vX.Y.Z tag, so the version input is required"
+                exit 1
+                ;;
+            esac
+          fi
+          echo "ref=${REF}"         >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "${{ github.ref_name }} → upstream qbz: ${TAG}, deb version: ${VERSION}"
+          echo "${{ github.ref_name }} → upstream qbz: ${REF}, deb version: ${VERSION}"
 
       # Must land at ./upstream — the Dockerfile does COPY upstream/ /build/.
       - name: Checkout upstream qbz
         uses: actions/checkout@v5
         with:
           repository: vicrodh/qbz
-          ref: ${{ steps.upstream.outputs.tag }}
+          ref: ${{ steps.upstream.outputs.ref }}
           path: upstream
 
       - name: Set up QEMU
