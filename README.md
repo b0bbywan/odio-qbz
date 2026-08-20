@@ -105,9 +105,9 @@ triple, so it stays 8 bytes on `arm-unknown-linux-gnueabihf` no matter how new
 the rootfs is. What fixes it is `alsa-sys` measuring `sizeof(snd_htimestamp_t)`
 against the rootfs's own ALSA headers and, when that is 16, defining its own
 `timespec` — which `alsa` then uses in place of libc's, and cpal after it. The
-first two shipped on 2026-07-31 as `alsa-sys` 0.6.1 and `alsa` 0.12.1; cpal has
-not followed, so `patches/0003` asks for those two by version and still pins
-cpal from git.
+first two shipped on 2026-07-31 as `alsa-sys` 0.6.1 and `alsa` 0.12.1; cpal
+merged its part but has not released it — 0.18.2 still asks for `alsa ^0.11` —
+so `patches/0003` asks for those two by version and pins cpal from git.
 (`RUST_LIBC_UNSTABLE_GNU_TIME_BITS=64` widens libc's for the whole crate graph
 instead, but it is unstable, and `alsa` 0.11 does not compile with it: its
 `timespec` literals do not fill the private `__pad` a time64 libc adds.)
@@ -164,11 +164,14 @@ aarch64 only, so nothing there exercises 32-bit portability:
 - `0003-alsa-take-the-time64-timespec-fix-cpal-and-rodio-from-git.patch` — moves
   the graph onto the time64 `timespec` fix (see above). `alsa-sys` 0.6.1 and
   `alsa` 0.12.1 carry it and are on crates.io, so they are version requirements;
-  `cpal` is still pinned to the revision of
-  [cpal#1285](https://github.com/RustAudio/cpal/pull/1285), which is open. rodio
-  is pinned with it only because it is what accepts cpal 0.18, and
-  `links = "alsa"` forbids two `alsa-sys` copies in one graph, so the chain
-  moves as a whole.
+  `cpal` is pinned to a master rev, because
+  [cpal#1285](https://github.com/RustAudio/cpal/pull/1285) was squash-merged —
+  master is already 0.19.0-dev and no 0.18.x release will carry the fix. No
+  rodio accepts a cpal 0.19 yet, and `links = "alsa"` forbids two `alsa-sys`
+  copies in one graph, so rodio comes from a
+  [fork branch](https://github.com/b0bbywan/rodio/tree/cpal-0.19): rodio master
+  plus the one-line `cpal = "0.19"` bump upstream will make itself at the cpal
+  release. Both pins drop together once cpal 0.19 is out and rodio requires it.
 
 Both carry `Cargo.lock`, because the build runs `--locked`.
 
