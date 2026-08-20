@@ -142,39 +142,13 @@ jobs:
           retention-days: 7
 
   release:
-    name: Create GitHub Release
+    name: Release and reindex
     needs: build
-    runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
-
-    steps:
-      - name: Download all packages
-        uses: actions/download-artifact@v8
-        with:
-          pattern: qbzd-*-deb
-          merge-multiple: true
-          path: dist/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.deb
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
-
-  notify-apt-repo:
-    name: Trigger APT repo update
-    needs: release
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    steps:
-      - name: Trigger apt-repo rebuild
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.APT_REPO_TOKEN }}
-          repository: b0bbywan/odio-apt-repo
-          event-type: release-published
-          client-payload: '{"repo": "${{ github.repository }}", "tag": "${{ github.ref_name }}"}'
+    uses: b0bbywan/odio-ci/.github/workflows/release.yml@v1.0.3
+    with:
+      artifact_pattern: qbzd-*-deb
+    secrets:
+      apt_repo_token: ${{ secrets.APT_REPO_TOKEN }}
