@@ -183,12 +183,22 @@ portability, and the desktop app is what gets exercised day to day:
   that diffs the player and publishes the edges. Taken from
   [b0bbywan/qbz@3637f00a](https://github.com/b0bbywan/qbz/commit/3637f00a4c7e938cdbe998b05ea2f739f9d35585)
   (branch `bugfix/external/qbzd-playback-events`), not yet submitted upstream.
+- `0005-mpris-implement-shuffle-and-loopstatus.patch` — the MPRIS `Shuffle`
+  and `LoopStatus` properties were published but stubbed: always `false` /
+  `None`, and writes were dropped, so a media widget showed buttons that did
+  nothing. The core already had the setters and emitted the change events;
+  the patch stores both in the MPRIS state, forwards writes, and wires qbzd
+  (seed + bus) and the desktop. Taken from
+  [b0bbywan/qbz@267ee043](https://github.com/b0bbywan/qbz/commit/267ee043)
+  (branch `bugfix/external/mpris-shuffle-loop`), not yet submitted upstream.
+  The desktop hunks ride along so the patch stays the verbatim commit; this
+  package only compiles the daemon side.
 
 0002 and 0003 carry `Cargo.lock`, because the build runs `--locked`.
 
 Patches are applied on **every** arch: 0002 is a packaging choice wanted
-everywhere, 0003 is the same dependency graph everywhere, and 0004 is a daemon
-bug that has nothing to do with the CPU. Scoping any of them to armhf would
+everywhere, 0003 is the same dependency graph everywhere, and 0004/0005 are
+daemon bugs that have nothing to do with the CPU. Scoping any of them to armhf would
 only mean shipping three binaries built from two different sources, and for
 0002 it would leave the 64-bit packages declaring a `libssl3` dependency they
 do not link.

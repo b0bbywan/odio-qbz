@@ -62,7 +62,7 @@ COPY upstream/ /build/
 COPY patches/ /patches/
 
 # Applied on every arch: 0002 is a packaging choice we want everywhere, 0003
-# pins the same dependency graph for all of them, and 0004 fixes daemon
+# pins the same dependency graph for all of them, and 0004/0005 fix daemon
 # behaviour independent of the CPU — scoping any to armhf would only mean
 # shipping three binaries built from two different sources.
 # A patch that no longer applies is a hard failure. The reverse-apply test only
