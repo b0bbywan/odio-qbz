@@ -146,8 +146,9 @@ in the graph.
 ## Patches
 
 `patches/*.patch` holds the minimum needed to make the upstream tree build and
-run correctly on a 32-bit target. Upstream builds this workspace for x86_64 and
-aarch64 only, so nothing there exercises 32-bit portability:
+run correctly as a headless daemon on a 32-bit target. Upstream builds this
+workspace for x86_64 and aarch64 only, so nothing there exercises 32-bit
+portability, and the desktop app is what gets exercised day to day:
 
 - `0002-tls-use-the-system-openssl-instead-of-a-bundled-crypto-stack.patch` —
   moves reqwest and tokio-tungstenite to native-tls, because no rustls provider
@@ -172,14 +173,25 @@ aarch64 only, so nothing there exercises 32-bit portability:
   [fork branch](https://github.com/b0bbywan/rodio/tree/cpal-0.19): rodio master
   plus the one-line `cpal = "0.19"` bump upstream will make itself at the cpal
   release. Both pins drop together once cpal 0.19 is out and rodio requires it.
+- `0004-qbzd-publish-playback-events-on-the-bus.patch` — makes the daemon's
+  MPRIS widget, scrobbler, `GET /api/events` and sleep inhibitor follow
+  playback. The core never emits `TrackStarted`, `PlaybackStateChanged`,
+  `PositionUpdated` or `VolumeChanged`; the desktop does not need it because
+  its Slint loop polls the player every 450 ms and pushes state by hand, but
+  `qbzd` has no such loop and all its surfaces subscribe to the event bus, so
+  they only ever saw the one-time boot seed. The patch adds one 450 ms poller
+  that diffs the player and publishes the edges. Taken from
+  [b0bbywan/qbz@3637f00a](https://github.com/b0bbywan/qbz/commit/3637f00a4c7e938cdbe998b05ea2f739f9d35585)
+  (branch `bugfix/external/qbzd-playback-events`), not yet submitted upstream.
 
-Both carry `Cargo.lock`, because the build runs `--locked`.
+0002 and 0003 carry `Cargo.lock`, because the build runs `--locked`.
 
 Patches are applied on **every** arch: 0002 is a packaging choice wanted
-everywhere, and 0003 is the same dependency graph everywhere. Scoping either to
-armhf would only mean shipping three binaries built from two different sources,
-and for 0002 it would leave the 64-bit packages declaring a `libssl3` dependency
-they do not link.
+everywhere, 0003 is the same dependency graph everywhere, and 0004 is a daemon
+bug that has nothing to do with the CPU. Scoping any of them to armhf would
+only mean shipping three binaries built from two different sources, and for
+0002 it would leave the 64-bit packages declaring a `libssl3` dependency they
+do not link.
 
 A patch that no longer applies **fails the build** rather than being skipped —
 that means either upstream fixed it (delete the patch) or the code moved
