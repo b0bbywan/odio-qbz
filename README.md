@@ -12,8 +12,8 @@ Release.
 ## Why not just use upstream's .deb
 
 Upstream already ships `.deb`s (`QBZ_<v>_amd64.deb`, `QBZ_<v>_arm64.deb`), but
-they are desktop packages: one `qbz` package containing both the Slint GUI
-binary and `qbzd`, so it depends on the whole GUI runtime (fontconfig,
+they are desktop packages: one `qbz` package containing both the GUI binary
+and `qbzd`, so it depends on the whole GUI runtime (fontconfig,
 freetype, wayland, xcb, GL/EGL) and carries a glibc 2.39 floor from its
 `ubuntu-24.04` builder. There is no 32-bit build at all.
 
@@ -136,12 +136,12 @@ to reason about — one glibc floor, one set of package names, one set of
 headers behind `alsa-sys`' probe — instead of a split that only armhf actually
 needed.
 
-The desktop `qbz` binary is out of scope here: its generated `qbz_ui` crate is
-one ~1.6M-line module needing ~30 GB for a single `rustc`. `qbzd` is the
-Slint-free column of the workspace — 381 crates whose entire native surface is
-`alsa-sys`, `jack-sys`, a bundled `libsqlite3-sys` and the system OpenSSL, with
-no libdbus (`zbus` is pure Rust) and no bindgen or cmake anywhere
-in the graph.
+The desktop binary is out of scope here — this package is the daemon, and the
+UI half of the workspace is an order of magnitude more expensive to compile.
+`qbzd` is the column that carries no UI: 381 crates whose entire native surface
+is `alsa-sys`, `jack-sys`, a bundled `libsqlite3-sys` and the system OpenSSL,
+with no libdbus (`zbus` is pure Rust) and no bindgen or cmake anywhere in the
+graph.
 
 ## Patches
 
@@ -181,10 +181,10 @@ portability, and the desktop app is what gets exercised day to day:
   (seed + bus). Taken from
   [b0bbywan/qbz@267ee043](https://github.com/b0bbywan/qbz/commit/267ee043)
   (branch `bugfix/external/mpris-shuffle-loop`), not yet submitted upstream.
-  Daemon side only: the original carried the Slint desktop too, and the Qt
-  port that replaced it exposes toggle/cycle steps where an MPRIS write
-  carries a target, so `qbz-qt` names both events and drops them rather than
-  flipping the wrong way. This package compiles neither.
+  Daemon side only: the original carried the desktop too, and the Qt port that
+  replaced it exposes toggle/cycle steps where an MPRIS write carries a target,
+  so `qbz-qt` names both events and drops them rather than flipping the wrong
+  way. This package compiles neither.
 
 0002 and 0003 carry `Cargo.lock`, because the build runs `--locked`.
 
@@ -249,9 +249,6 @@ gh workflow run build.yml -f upstream_ref=pre-release -f version=2.0.2+pre.1
 Every arch fails the build loudly rather than shipping a subtly broken daemon.
 All of them run inside the builder, natively, so they need no cross tooling:
 
-- **Slint-free dependency graph** — mirrors upstream's own gate. If a future
-  release wires the UI into `qbzd`'s graph, this stops being a small build and
-  we find out before `rustc` starts.
 - **ARMv6 baseline** (armhf only) — `readelf -A` must report `Tag_CPU_arch: v6`.
   This is a *proxy*: the attribute records the highest architecture of any input
   object, so one hand-written asm file raises the whole binary even when the

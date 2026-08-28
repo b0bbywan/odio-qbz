@@ -1,4 +1,4 @@
-# qbzd — daemon-only .deb. Upstream's own nfpm config ships the Slint binary in
+# qbzd — daemon-only .deb. Upstream's own nfpm config ships the GUI binary in
 # the same package; see the README for the comparison.
 #
 # Env from scripts/build-qbzd-deb.sh: QBZD_VERSION, QBZD_ARCH, QBZD_LIBC_MIN.

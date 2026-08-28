@@ -24,8 +24,8 @@ qbzd
   setters spawned off the D-Bus thread.
 
 qbz-qt (desktop)
-  Not wired, and deliberately so. The Slint desktop this patch first covered
-  is gone — the Qt port replaced `crates/qbz` wholesale — and an MPRIS write
+  Not wired, and deliberately so. The desktop this patch first covered is
+  gone — the Qt port replaced `crates/qbz` wholesale — and an MPRIS write
   carries a TARGET where the only Qt entry points are the toggle/cycle steps
   (`transport_toggle_shuffle`, `transport_cycle_repeat`), which flip the
   wrong way whenever the target already matches. Targeted setters behind the

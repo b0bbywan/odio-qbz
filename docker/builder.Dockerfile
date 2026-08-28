@@ -98,11 +98,6 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/build/crates/target \
     set -eux; \
     \
-    echo "=== gate: qbzd must stay Slint-free ==="; \
-    hits="$(cargo tree --manifest-path crates/Cargo.toml --locked -p qbzd -e normal \
-            | grep -E '\b(slint|qbz-ui|qbz-slint-common|qbz-dac-wizard) v' || true)"; \
-    if [ -n "$hits" ]; then echo "$hits"; echo "ERROR: qbzd's graph now resolves Slint" >&2; exit 1; fi; \
-    \
     cargo build --locked --release --manifest-path crates/Cargo.toml -p qbzd; \
     \
     mkdir -p /out/completions; \
