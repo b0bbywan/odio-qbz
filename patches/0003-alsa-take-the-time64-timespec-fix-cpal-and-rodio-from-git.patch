@@ -58,10 +58,10 @@ Drop this patch once cpal 0.19 is released and rodio requires it; the
 fork branch and the alsa version requirements die with it.
 
 diff --git a/crates/Cargo.lock b/crates/Cargo.lock
-index a34b95b..947c7d6 100644
+index 168a9e91..ef769024 100644
 --- a/crates/Cargo.lock
 +++ b/crates/Cargo.lock
-@@ -196,9 +196,9 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+@@ -72,9 +72,9 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
  
  [[package]]
  name = "alsa"
@@ -73,7 +73,7 @@ index a34b95b..947c7d6 100644
  dependencies = [
   "alsa-sys",
   "bitflags 2.13.0",
-@@ -208,10 +208,11 @@ dependencies = [
+@@ -84,10 +84,11 @@ dependencies = [
  
  [[package]]
  name = "alsa-sys"
@@ -87,36 +87,9 @@ index a34b95b..947c7d6 100644
   "libc",
   "pkg-config",
  ]
-@@ -225,7 +226,7 @@ dependencies = [
-  "android-properties",
-  "bitflags 2.13.0",
-  "cc",
-- "jni 0.22.4",
-+ "jni",
-  "libc",
-  "log",
-  "ndk",
-@@ -306,7 +307,7 @@ version = "1.1.5"
+@@ -402,6 +403,43 @@ version = "1.1.2"
  source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
- dependencies = [
-- "windows-sys 0.61.2",
-+ "windows-sys 0.60.2",
- ]
- 
- [[package]]
-@@ -317,7 +318,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
- dependencies = [
-  "anstyle",
-  "once_cell_polyfill",
-- "windows-sys 0.61.2",
-+ "windows-sys 0.60.2",
- ]
- 
- [[package]]
-@@ -654,6 +655,43 @@ dependencies = [
-  "zbus 5.15.0",
- ]
+ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
  
 +[[package]]
 +name = "audio-core"
@@ -156,9 +129,9 @@ index a34b95b..947c7d6 100644
 +]
 +
  [[package]]
- name = "auto_enums"
- version = "0.8.8"
-@@ -1044,12 +1082,6 @@ dependencies = [
+ name = "autocfg"
+ version = "1.5.0"
+@@ -599,12 +637,6 @@ dependencies = [
   "shlex",
  ]
  
@@ -169,9 +142,9 @@ index a34b95b..947c7d6 100644
 -checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 -
  [[package]]
- name = "cexpr"
- version = "0.6.0"
-@@ -1458,9 +1490,9 @@ dependencies = [
+ name = "cfg-if"
+ version = "1.0.4"
+@@ -929,9 +961,9 @@ dependencies = [
  
  [[package]]
  name = "coreaudio-rs"
@@ -183,7 +156,7 @@ index a34b95b..947c7d6 100644
  dependencies = [
   "bitflags 2.13.0",
   "libc",
-@@ -1478,14 +1510,16 @@ checksum = "7704b5fdd17b18ae31c4c1da5a2e0305a2bf17b5249300a9ee9ed7b72114c636"
+@@ -943,13 +975,15 @@ dependencies = [
  
  [[package]]
  name = "cpal"
@@ -197,14 +170,12 @@ index a34b95b..947c7d6 100644
 + "block2 0.6.2",
   "coreaudio-rs",
   "dasp_sample",
-- "jni 0.21.1",
 + "futures-executor",
 + "futures-util",
-+ "jni",
+  "jni",
   "js-sys",
   "libc",
-  "mach2",
-@@ -1500,10 +1534,11 @@ dependencies = [
+@@ -965,10 +999,11 @@ dependencies = [
   "objc2-core-audio-types",
   "objc2-core-foundation",
   "objc2-foundation 0.3.2",
@@ -218,16 +189,7 @@ index a34b95b..947c7d6 100644
  ]
  
  [[package]]
-@@ -1869,7 +1904,7 @@ dependencies = [
-  "libc",
-  "option-ext",
-  "redox_users 0.5.2",
-- "windows-sys 0.61.2",
-+ "windows-sys 0.59.0",
- ]
- 
- [[package]]
-@@ -2031,6 +2066,17 @@ version = "1.1.1"
+@@ -1551,6 +1586,17 @@ version = "1.1.1"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
  
@@ -245,78 +207,120 @@ index a34b95b..947c7d6 100644
  [[package]]
  name = "enumflags2"
  version = "0.7.12"
-@@ -2108,7 +2154,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
- dependencies = [
+@@ -1853,6 +1899,21 @@ dependencies = [
   "libc",
-- "windows-sys 0.61.2",
-+ "windows-sys 0.52.0",
  ]
  
++[[package]]
++name = "futures"
++version = "0.3.32"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d"
++dependencies = [
++ "futures-channel",
++ "futures-core",
++ "futures-executor",
++ "futures-io",
++ "futures-sink",
++ "futures-task",
++ "futures-util",
++]
++
  [[package]]
-@@ -2783,7 +2829,7 @@ dependencies = [
-  "log",
-  "presser",
-  "thiserror 2.0.18",
-- "windows 0.62.2",
-+ "windows 0.61.3",
- ]
+ name = "futures-channel"
+ version = "0.3.32"
+@@ -1869,6 +1930,17 @@ version = "0.3.32"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
  
++[[package]]
++name = "futures-executor"
++version = "0.3.32"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "baf29c38818342a3b26b5b923639e7b1f4a61fc5e76102d4b1981c6dc7a7579d"
++dependencies = [
++ "futures-core",
++ "futures-task",
++ "futures-util",
++]
++
  [[package]]
-@@ -3072,7 +3118,7 @@ dependencies = [
-  "android-build",
-  "i-slint-core",
-  "i-slint-renderer-skia",
-- "jni 0.22.4",
-+ "jni",
-  "raw-window-handle",
- ]
+ name = "futures-io"
+ version = "0.3.32"
+@@ -1917,6 +1989,7 @@ version = "0.3.32"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6"
+ dependencies = [
++ "futures-channel",
+  "futures-core",
+  "futures-io",
+  "futures-macro",
+@@ -2623,18 +2696,32 @@ dependencies = [
  
-@@ -3359,7 +3405,7 @@ dependencies = [
-  "js-sys",
-  "log",
-  "wasm-bindgen",
-- "windows-core 0.62.2",
-+ "windows-core 0.61.2",
- ]
- 
- [[package]]
-@@ -3807,22 +3853,6 @@ dependencies = [
-  "syn 2.0.117",
- ]
- 
--[[package]]
--name = "jni"
--version = "0.21.1"
--source = "registry+https://github.com/rust-lang/crates.io-index"
--checksum = "1a87aa2bb7d2af34197c04845522473242e1aa17c12f4935d5856491a7fb8c97"
--dependencies = [
-- "cesu8",
-- "cfg-if",
-- "combine",
-- "jni-sys 0.3.0",
-- "log",
-- "thiserror 1.0.69",
-- "walkdir",
-- "windows-sys 0.45.0",
--]
--
  [[package]]
  name = "jni"
- version = "0.22.4"
-@@ -4006,9 +4036,9 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
- 
- [[package]]
- name = "libc"
--version = "0.2.183"
-+version = "0.2.189"
+-version = "0.21.1"
++version = "0.22.4"
  source = "registry+https://github.com/rust-lang/crates.io-index"
--checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
-+checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+-checksum = "1a87aa2bb7d2af34197c04845522473242e1aa17c12f4935d5856491a7fb8c97"
++checksum = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
+ dependencies = [
+- "cesu8",
+  "cfg-if",
+  "combine",
+- "jni-sys",
++ "jni-macros",
++ "jni-sys 0.4.1",
+  "log",
+- "thiserror 1.0.69",
++ "simd_cesu8",
++ "thiserror 2.0.18",
+  "walkdir",
+- "windows-sys 0.45.0",
++ "windows-link 0.2.1",
++]
++
++[[package]]
++name = "jni-macros"
++version = "0.22.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "rustc_version",
++ "simd_cesu8",
++ "syn 2.0.117",
+ ]
  
  [[package]]
- name = "libdbus-sys"
-@@ -4272,12 +4302,9 @@ dependencies = [
+@@ -2643,6 +2730,25 @@ version = "0.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
+ 
++[[package]]
++name = "jni-sys"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2"
++dependencies = [
++ "jni-sys-macros",
++]
++
++[[package]]
++name = "jni-sys-macros"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
++dependencies = [
++ "quote",
++ "syn 2.0.117",
++]
++
+ [[package]]
+ name = "jobserver"
+ version = "0.1.34"
+@@ -2927,12 +3033,9 @@ dependencies = [
  
  [[package]]
  name = "mach2"
@@ -331,7 +335,33 @@ index a34b95b..947c7d6 100644
  
  [[package]]
  name = "malloc_buf"
-@@ -4834,6 +4861,7 @@ version = "0.3.2"
+@@ -3073,7 +3176,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c3f42e7bbe13d351b6bead8286a43aac9534b82bd3cc43e47037f012ebfd62d4"
+ dependencies = [
+  "bitflags 2.13.0",
+- "jni-sys",
++ "jni-sys 0.3.0",
+  "log",
+  "ndk-sys",
+  "num_enum",
+@@ -3092,7 +3195,7 @@ version = "0.6.0+11769913"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
+ dependencies = [
+- "jni-sys",
++ "jni-sys 0.3.0",
+ ]
+ 
+ [[package]]
+@@ -3256,7 +3359,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+ dependencies = [
+  "autocfg",
+- "libm",
+ ]
+ 
+ [[package]]
+@@ -3374,6 +3476,7 @@ version = "0.3.2"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
  dependencies = [
@@ -339,21 +369,21 @@ index a34b95b..947c7d6 100644
   "objc2 0.6.4",
   "objc2-foundation 0.3.2",
  ]
-@@ -5591,9 +5619,9 @@ dependencies = [
+@@ -3843,9 +3946,9 @@ dependencies = [
  
  [[package]]
  name = "pkg-config"
 -version = "0.3.32"
-+version = "0.3.33"
++version = "0.3.34"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
-+checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
++checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
  
  [[package]]
  name = "plain"
-@@ -5899,6 +5927,22 @@ version = "0.11.0"
- source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
+@@ -4093,6 +4196,22 @@ dependencies = [
+  "psl-types",
+ ]
  
 +[[package]]
 +name = "pulseaudio"
@@ -374,7 +404,7 @@ index a34b95b..947c7d6 100644
  [[package]]
  name = "pure-rust-locales"
  version = "0.8.2"
-@@ -6672,16 +6716,6 @@ version = "0.10.0"
+@@ -4975,16 +5094,6 @@ version = "0.10.0"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "0c8d0fd677905edcbeedbf2edb6494d676f0e98d54d5cf9bda0b061cb8fb8aba"
  
@@ -389,9 +419,9 @@ index a34b95b..947c7d6 100644
 -]
 -
  [[package]]
- name = "range-alloc"
- version = "0.1.5"
-@@ -7092,15 +7126,12 @@ dependencies = [
+ name = "ratatui"
+ version = "0.30.2"
+@@ -5255,15 +5364,12 @@ dependencies = [
  [[package]]
  name = "rodio"
  version = "0.22.2"
@@ -409,7 +439,7 @@ index a34b95b..947c7d6 100644
   "symphonia",
   "thiserror 2.0.18",
  ]
-@@ -7151,6 +7182,20 @@ version = "0.3.3"
+@@ -5280,6 +5386,20 @@ version = "0.3.3"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "7204ed6420f698836b76d4d5c2ec5dec7585fd5c3a788fd1cde855d1de598239"
  
@@ -430,25 +460,30 @@ index a34b95b..947c7d6 100644
  [[package]]
  name = "rupnp"
  version = "3.0.0"
-@@ -7260,7 +7305,7 @@ dependencies = [
-  "errno",
-  "libc",
-  "linux-raw-sys 0.12.1",
-- "windows-sys 0.61.2",
-+ "windows-sys 0.52.0",
- ]
+@@ -5694,6 +5814,22 @@ version = "0.3.8"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
  
++[[package]]
++name = "simd_cesu8"
++version = "1.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "11031e251abf8611c80f460e19dbdeb54a66db918e49c65a7065b46ac7aec520"
++dependencies = [
++ "rustc_version",
++ "simdutf8",
++]
++
++[[package]]
++name = "simdutf8"
++version = "0.1.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
++
  [[package]]
-@@ -7871,7 +7916,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
- dependencies = [
-  "libc",
-- "windows-sys 0.61.2",
-+ "windows-sys 0.60.2",
- ]
- 
- [[package]]
-@@ -8166,6 +8211,7 @@ dependencies = [
+ name = "siphasher"
+ version = "1.0.3"
+@@ -5944,6 +6080,7 @@ dependencies = [
   "bytemuck",
   "lazy_static",
   "log",
@@ -456,36 +491,9 @@ index a34b95b..947c7d6 100644
  ]
  
  [[package]]
-@@ -8350,7 +8396,7 @@ dependencies = [
-  "getrandom 0.4.2",
-  "once_cell",
-  "rustix 1.1.4",
-- "windows-sys 0.61.2",
-+ "windows-sys 0.52.0",
+@@ -6748,6 +6885,17 @@ dependencies = [
+  "nom 7.1.3",
  ]
- 
- [[package]]
-@@ -8372,7 +8418,7 @@ dependencies = [
-  "parking_lot",
-  "rustix 1.1.4",
-  "signal-hook",
-- "windows-sys 0.61.2",
-+ "windows-sys 0.60.2",
- ]
- 
- [[package]]
-@@ -8946,7 +8992,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
- dependencies = [
-  "memoffset",
-  "tempfile",
-- "windows-sys 0.61.2",
-+ "windows-sys 0.60.2",
- ]
- 
- [[package]]
-@@ -9164,6 +9210,17 @@ version = "0.9.5"
- source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
  
 +[[package]]
 +name = "visibility"
@@ -499,27 +507,9 @@ index a34b95b..947c7d6 100644
 +]
 +
  [[package]]
- name = "vtable"
- version = "0.4.0"
-@@ -9507,7 +9564,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "0fc95580916af1e68ff6a7be07446fc5db73ebf71cf092de939bbf5f7e189f72"
- dependencies = [
-  "core-foundation 0.10.1",
-- "jni 0.22.4",
-+ "jni",
-  "log",
-  "ndk-context",
-  "objc2 0.6.4",
-@@ -9778,7 +9835,7 @@ version = "0.1.11"
- source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
- dependencies = [
-- "windows-sys 0.61.2",
-+ "windows-sys 0.48.0",
- ]
- 
- [[package]]
-@@ -9787,6 +9844,15 @@ version = "0.4.0"
+ name = "vtparse"
+ version = "0.6.2"
+@@ -7123,6 +7271,15 @@ version = "0.4.0"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
  
@@ -535,7 +525,7 @@ index a34b95b..947c7d6 100644
  [[package]]
  name = "windows"
  version = "0.44.0"
-@@ -9977,15 +10043,6 @@ dependencies = [
+@@ -7313,15 +7470,6 @@ dependencies = [
   "windows-link 0.2.1",
  ]
  
@@ -552,13 +542,15 @@ index a34b95b..947c7d6 100644
  name = "windows-sys"
  version = "0.48.0"
 diff --git a/crates/Cargo.toml b/crates/Cargo.toml
-index 53f0bf6..7eca8f9 100644
+index 0b53d20e..a16799b9 100644
 --- a/crates/Cargo.toml
 +++ b/crates/Cargo.toml
-@@ -104,6 +104,20 @@ strsim = "0.11"
+@@ -122,3 +122,19 @@ strsim = "0.11"
+ # workflows' env (CARGO_PROFILE_RELEASE_*) — they are CI-memory tuning, not
+ # a property of the package.
  strip = "symbols"
- 
- [patch.crates-io]
++
++[patch.crates-io]
 +# 32-bit time64: on Debian trixie libasound writes a 16-byte struct timespec,
 +# while libc::timespec stays 8 bytes on arm-unknown-linux-gnueabihf, so
 +# Status::get_htstamp overruns the frame of whoever called it. alsa-sys 0.6.1
@@ -573,11 +565,8 @@ index 53f0bf6..7eca8f9 100644
 +# the release. Drop both once cpal 0.19 is out and rodio requires it.
 +cpal = { git = "https://github.com/RustAudio/cpal", rev = "8f7e77a82cc4cdadf89b20b48e3acec44304a1e3" }
 +rodio = { git = "https://github.com/b0bbywan/rodio", rev = "a29deadafa7efddb9e1e581ac80fe837d8b649f1" }
- # Slint 1.16's femtovg-wgpu renderer leaves the wgpu surface alpha mode at
- # `Auto`, which resolves as an opaque compositor surface on KWin/Wayland and
- # makes borderless transparent windows show a black rectangular backing. The
 diff --git a/crates/qbz-audio/Cargo.toml b/crates/qbz-audio/Cargo.toml
-index 93cbbd3..9a3856e 100644
+index 7f72e205..503af55f 100644
 --- a/crates/qbz-audio/Cargo.toml
 +++ b/crates/qbz-audio/Cargo.toml
 @@ -45,11 +45,13 @@ ringbuf = "0.4"

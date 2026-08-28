@@ -178,11 +178,13 @@ portability, and the desktop app is what gets exercised day to day:
   `None`, and writes were dropped, so a media widget showed buttons that did
   nothing. The core already had the setters and emitted the change events;
   the patch stores both in the MPRIS state, forwards writes, and wires qbzd
-  (seed + bus) and the desktop. Taken from
+  (seed + bus). Taken from
   [b0bbywan/qbz@267ee043](https://github.com/b0bbywan/qbz/commit/267ee043)
   (branch `bugfix/external/mpris-shuffle-loop`), not yet submitted upstream.
-  The desktop hunks ride along so the patch stays the verbatim commit; this
-  package only compiles the daemon side.
+  Daemon side only: the original carried the Slint desktop too, and the Qt
+  port that replaced it exposes toggle/cycle steps where an MPRIS write
+  carries a target, so `qbz-qt` names both events and drops them rather than
+  flipping the wrong way. This package compiles neither.
 
 0002 and 0003 carry `Cargo.lock`, because the build runs `--locked`.
 

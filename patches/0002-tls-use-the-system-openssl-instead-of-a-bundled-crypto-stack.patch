@@ -28,18 +28,27 @@ for rustls would pull it back in. PR #663 (fengalin) moved reqwest to
 `rustls-tls-webpki-roots-no-provider` and installs an aws-lc-rs provider
 from qbz-app, which leaves BOTH providers in the graph: aws-lc-sys through
 that provider, and ring through qconnect-transport-ws's tokio-tungstenite,
-which the PR did not touch. So the provider declaration and its two call
-sites go too — with native-tls there is nothing to install.
+which the PR did not touch. So the provider declaration and its three call
+sites go too — qbzd, qbz-qt and qbz-app's own test helper — because with
+native-tls there is nothing to install.
 
-Verified on the pre-release branch: `cargo tree -p qbzd -e normal` resolves
-no ring, no aws-lc-sys and no rustls, and reaches openssl-sys through
-native-tls. Cargo.lock is included because the build runs --locked.
+Six crates keep a rustls DEV-dependency and install a provider of their own:
+their tests build a reqwest client directly and have no application startup
+to do it for them. Dev-dependencies sit outside `cargo tree -e normal` and
+outside `cargo build -p qbzd`, so they never reach the shipped binary, and
+leaving them alone keeps `cargo test` green on crates this patch does not
+otherwise touch.
+
+Verified on pre-release 353ed7ff: `cargo tree --locked -p qbzd -e normal`
+resolves no ring, no aws-lc-sys and no rustls, and reaches openssl-sys
+through native-tls; `cargo check --locked -p qbzd` passes. Cargo.lock is
+included because the build runs --locked.
 
 diff --git a/crates/Cargo.lock b/crates/Cargo.lock
-index 64aa5fa..a34b95b 100644
+index 59eed14d..168a9e91 100644
 --- a/crates/Cargo.lock
 +++ b/crates/Cargo.lock
-@@ -3025,20 +3025,19 @@ dependencies = [
+@@ -2217,20 +2217,19 @@ dependencies = [
  ]
  
  [[package]]
@@ -67,45 +76,44 @@ index 64aa5fa..a34b95b 100644
  ]
  
  [[package]]
-@@ -4489,6 +4488,23 @@ dependencies = [
-  "unicode-ident",
+@@ -3050,6 +3049,23 @@ dependencies = [
+  "zbus 4.4.0",
  ]
  
 +[[package]]
 +name = "native-tls"
-+version = "0.2.14"
++version = "0.2.18"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "87de3442987e9dbec73158d5c715e7ad9072fda936bb03d19d7fa10e00520f0e"
++checksum = "465500e14ea162429d264d44189adc38b199b62b1c21eea9f69e4b73cb03bbf2"
 +dependencies = [
 + "libc",
 + "log",
 + "openssl",
-+ "openssl-probe 0.1.6",
++ "openssl-probe",
 + "openssl-sys",
 + "schannel",
-+ "security-framework 2.11.1",
++ "security-framework 3.7.0",
 + "security-framework-sys",
 + "tempfile",
 +]
 +
  [[package]]
- name = "natord"
- version = "1.0.9"
-@@ -5205,12 +5221,56 @@ dependencies = [
+ name = "ndk"
+ version = "0.9.0"
+@@ -3542,12 +3558,49 @@ dependencies = [
   "pathdiff",
  ]
  
 +[[package]]
 +name = "openssl"
-+version = "0.10.74"
++version = "0.10.81"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "24ad14dd45412269e1a30f52ad8f0664f0f4f4a89ee8fe28c3b3527021ebb654"
++checksum = "77823a27f0babb03091cb9ed9ef80af3b39dbc82f97e8fa530374b7dafd87a45"
 +dependencies = [
 + "bitflags 2.13.0",
 + "cfg-if",
-+ "foreign-types 0.3.2",
++ "foreign-types",
 + "libc",
-+ "once_cell",
 + "openssl-macros",
 + "openssl-sys",
 +]
@@ -121,12 +129,6 @@ index 64aa5fa..a34b95b 100644
 + "syn 2.0.117",
 +]
 +
-+[[package]]
-+name = "openssl-probe"
-+version = "0.1.6"
-+source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
-+
  [[package]]
  name = "openssl-probe"
  version = "0.2.1"
@@ -135,9 +137,9 @@ index 64aa5fa..a34b95b 100644
  
 +[[package]]
 +name = "openssl-sys"
-+version = "0.9.110"
++version = "0.9.117"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "0a9f0075ba3c21b09f8e8b2026584b1d18d49388648f2fbbf3c97ea8deced8e2"
++checksum = "b47e7e6bb2c38cd930d25a23b40fa52e068c10e85f3e03a7f5ba5aaca5713695"
 +dependencies = [
 + "cc",
 + "libc",
@@ -148,15 +150,15 @@ index 64aa5fa..a34b95b 100644
  [[package]]
  name = "option-ext"
  version = "0.2.0"
-@@ -5933,7 +5993,6 @@ dependencies = [
+@@ -4070,7 +4123,6 @@ dependencies = [
   "rand 0.10.1",
   "reqwest",
   "rusqlite",
 - "rustls",
   "serde",
   "serde_json",
-  "tokio",
-@@ -6930,20 +6989,20 @@ dependencies = [
+  "tempfile",
+@@ -5126,20 +5178,20 @@ dependencies = [
   "http-body",
   "http-body-util",
   "hyper",
@@ -180,7 +182,7 @@ index 64aa5fa..a34b95b 100644
   "tokio-util",
   "tower",
   "tower-http",
-@@ -6953,7 +7012,6 @@ dependencies = [
+@@ -5149,7 +5201,6 @@ dependencies = [
   "wasm-bindgen-futures",
   "wasm-streams",
   "web-sys",
@@ -188,40 +190,7 @@ index 64aa5fa..a34b95b 100644
  ]
  
  [[package]]
-@@ -7226,10 +7284,10 @@ version = "0.8.3"
- source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "612460d5f7bea540c490b2b6395d8e34a953e52b491accd6c86c8164c5932a63"
- dependencies = [
-- "openssl-probe",
-+ "openssl-probe 0.2.1",
-  "rustls-pki-types",
-  "schannel",
-- "security-framework",
-+ "security-framework 3.7.0",
- ]
- 
- [[package]]
-@@ -7351,6 +7409,19 @@ dependencies = [
-  "zbus 4.4.0",
- ]
- 
-+[[package]]
-+name = "security-framework"
-+version = "2.11.1"
-+source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
-+dependencies = [
-+ "bitflags 2.13.0",
-+ "core-foundation 0.9.4",
-+ "core-foundation-sys",
-+ "libc",
-+ "security-framework-sys",
-+]
-+
- [[package]]
- name = "security-framework"
- version = "3.7.0"
-@@ -8592,12 +8663,12 @@ dependencies = [
+@@ -6280,12 +6331,12 @@ dependencies = [
  ]
  
  [[package]]
@@ -238,7 +207,7 @@ index 64aa5fa..a34b95b 100644
   "tokio",
  ]
  
-@@ -8621,12 +8692,10 @@ checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+@@ -6309,12 +6360,10 @@ checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
  dependencies = [
   "futures-util",
   "log",
@@ -253,7 +222,7 @@ index 64aa5fa..a34b95b 100644
  ]
  
  [[package]]
-@@ -8828,9 +8897,8 @@ dependencies = [
+@@ -6531,9 +6580,8 @@ dependencies = [
   "http",
   "httparse",
   "log",
@@ -264,8 +233,8 @@ index 64aa5fa..a34b95b 100644
   "sha1",
   "thiserror 1.0.69",
   "utf-8",
-@@ -9448,24 +9516,6 @@ dependencies = [
-  "web-sys",
+@@ -6954,24 +7002,6 @@ dependencies = [
+  "wasm-bindgen",
  ]
  
 -[[package]]
@@ -290,10 +259,10 @@ index 64aa5fa..a34b95b 100644
  name = "weezl"
  version = "0.1.12"
 diff --git a/crates/Cargo.toml b/crates/Cargo.toml
-index 4b7fec0..53f0bf6 100644
+index c552a543..0b53d20e 100644
 --- a/crates/Cargo.toml
 +++ b/crates/Cargo.toml
-@@ -59,7 +59,7 @@ serde = { version = "1", features = ["derive"] }
+@@ -80,7 +80,7 @@ serde = { version = "1", features = ["derive"] }
  serde_json = "1"
  
  # HTTP
@@ -303,20 +272,24 @@ index 4b7fec0..53f0bf6 100644
  # Logging
  log = "0.4"
 diff --git a/crates/qbz-app/Cargo.toml b/crates/qbz-app/Cargo.toml
-index 2e5ff6e..73ac5e8 100644
+index 01be6f20..bb09790d 100644
 --- a/crates/qbz-app/Cargo.toml
 +++ b/crates/qbz-app/Cargo.toml
-@@ -25,5 +25,3 @@ md-5 = { workspace = true }
+@@ -25,9 +25,6 @@ md-5 = { workspace = true }
  base64 = { workspace = true }
  rand = "0.10"
  
 -# TLS provider selection
 -rustls = { version = "0.23", features = ["aws_lc_rs"] }
+-
+ [dev-dependencies]
+ # A temp user dir for the settings-store tests.
+ tempfile = "3"
 diff --git a/crates/qbz-app/src/lib.rs b/crates/qbz-app/src/lib.rs
-index 56e5084..9e37578 100644
+index f1c9c254..538e2a17 100644
 --- a/crates/qbz-app/src/lib.rs
 +++ b/crates/qbz-app/src/lib.rs
-@@ -10,20 +10,3 @@ pub mod session_store;
+@@ -13,20 +13,3 @@ pub mod session_store;
  pub mod shell;
  pub mod settings;
  pub mod user_data;
@@ -337,8 +310,24 @@ index 56e5084..9e37578 100644
 -        }
 -    });
 -}
+diff --git a/crates/qbz-app/src/shell.rs b/crates/qbz-app/src/shell.rs
+index 43184f0f..a6fe04b2 100644
+--- a/crates/qbz-app/src/shell.rs
++++ b/crates/qbz-app/src/shell.rs
+@@ -308,11 +308,6 @@ mod tests {
+     }
+ 
+     fn test_runtime() -> AppRuntime<NoOpAdapter> {
+-        // QbzCore builds a reqwest client (MusicBrainz); since reqwest no
+-        // longer pulls a rustls provider (#663), tests must install the
+-        // process-level one explicitly, exactly like the real binaries do at
+-        // startup — otherwise Client construction panics with "No provider set".
+-        crate::ensure_crypto_provider();
+         AppRuntime::with_audio_settings(NoOpAdapter, None, AudioSettings::default(), None)
+     }
+ 
 diff --git a/crates/qbz-integrations/Cargo.toml b/crates/qbz-integrations/Cargo.toml
-index ae26fb9..9497c93 100644
+index ae26fb93..9497c932 100644
 --- a/crates/qbz-integrations/Cargo.toml
 +++ b/crates/qbz-integrations/Cargo.toml
 @@ -10,7 +10,7 @@ license = "MIT"
@@ -350,25 +339,26 @@ index ae26fb9..9497c93 100644
  
  # Serialization
  serde = { version = "1", features = ["derive"] }
-diff --git a/crates/qbz/src/main.rs b/crates/qbz/src/main.rs
-index 747ce77..4f33847 100644
---- a/crates/qbz/src/main.rs
-+++ b/crates/qbz/src/main.rs
-@@ -8120,9 +8120,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
-     // Large/XL (and shrink RAM at Small). Set before any artwork job runs.
-     crate::artwork::set_ui_scale_factor(ui_scale_factor);
+diff --git a/crates/qbz-qt/src/main.rs b/crates/qbz-qt/src/main.rs
+index 5d06ece5..b2bd0fb2 100644
+--- a/crates/qbz-qt/src/main.rs
++++ b/crates/qbz-qt/src/main.rs
+@@ -3430,10 +3430,6 @@ fn main() {
+     // post-login screen writes read it (:489, :565).
+     kiosk_profile_qt::init_at_boot();
  
--    // Install the rustls process-level `CryptoProvider`
+-    // rustls process-level CryptoProvider (aws-lc-rs) — required before any
+-    // reqwest call, same as the Slint and daemon binaries.
 -    qbz_app::ensure_crypto_provider();
 -
-     let tokio_rt = tokio::runtime::Runtime::new()?;
-     let _enter = tokio_rt.enter();
+     let tokio_runtime = Runtime::new().expect("failed to build the tokio runtime");
+     let _ = TOKIO.set(tokio_runtime);
  
 diff --git a/crates/qbzd/src/main.rs b/crates/qbzd/src/main.rs
-index 9f7ba40..a4285f2 100644
+index f70b326c..31146788 100644
 --- a/crates/qbzd/src/main.rs
 +++ b/crates/qbzd/src/main.rs
-@@ -256,9 +256,6 @@ enum ConfigCmd { Path, Show { #[arg(long)] json: bool } }
+@@ -258,9 +258,6 @@ enum ConfigCmd { Path, Show { #[arg(long)] json: bool } }
  
  #[tokio::main]
  async fn main() {
@@ -379,7 +369,7 @@ index 9f7ba40..a4285f2 100644
      let code = match cli.cmd {
          Cmd::Version { json } => {
 diff --git a/crates/qconnect-transport-ws/Cargo.toml b/crates/qconnect-transport-ws/Cargo.toml
-index d6cd727..ae45604 100644
+index d6cd7276..ae456040 100644
 --- a/crates/qconnect-transport-ws/Cargo.toml
 +++ b/crates/qconnect-transport-ws/Cargo.toml
 @@ -12,6 +12,6 @@ tokio = { workspace = true }
