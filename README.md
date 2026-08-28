@@ -218,43 +218,53 @@ build.
 Tag this repo with the upstream version to release:
 
 ```bash
-git tag v2.0.2 && git push origin v2.0.2
+git tag v2.0.3 && git push origin v2.0.3
 ```
 
 A prerelease, routed to the APT repo's `testing` suite, uses a suffix:
 
 ```bash
-git tag v2.0.2-alpha1 && git push origin v2.0.2-alpha1
+git tag v2.0.3-alpha.1 && git push origin v2.0.3-alpha.1
 ```
 
-Only `-rc<N>`, `-beta<N>` and `-alpha<N>` work. That spelling is not a style
-choice: `odio-ci` marks the GitHub Release as a prerelease on those three and
-nothing else, and `odio-apt-repo` reads that flag to pick the suite. A
-`-pre1` tag would build and then land in `stable`. The suffix becomes a
-Debian-sortable `~alpha1` in the package version, which sorts below `2.0.2`
-where a dash-revision would sort above.
+The suffix must be `-rc`, `-beta` or `-alpha`; the number may be attached
+(`-rc1`) or dotted (`-rc.1`), as the other odio repos write it. Those three
+words are not a style choice: `odio-ci` marks the GitHub Release as a
+prerelease on exactly them, and `odio-apt-repo` reads that flag to pick the
+suite, so a `-pre1` tag would build and then land in `stable`. The suffix
+becomes a Debian-sortable `~alpha.1` in the package version, which sorts below
+`2.0.3` where a dash-revision would sort above.
 
 ### Prereleases currently build the branch, not the tag
 
 `patches/` is written against upstream's `pre-release`, so there is no upstream
 tag they apply to. While that holds, `PRERELEASE_TRACKS_DEV_REF` in
 `build.yml` is `true` and a prerelease tag builds `UPSTREAM_DEV_REF` instead of
-the upstream tag its name implies. `v2.0.2-alpha1` gives:
+the upstream tag its name implies. `v2.0.3-alpha.1` gives:
 
 ```
 upstream ref   353ed7ff…            (pre-release, resolved to a commit)
-deb version    2.0.2~alpha1+g353ed7ff
+deb version    2.0.3~alpha.1+g353ed7ff
 suite          testing
 ```
 
 The version carries the upstream commit because a branch moves: without it two
-testing packages a week apart are indistinguishable in `dpkg -l`. The ref is
-resolved once, in its own job, and handed to all three arches — three jobs
-resolving a branch separately can package three different trees into one
-release.
+testing packages a week apart are indistinguishable in `dpkg -l`. It does NOT
+order them — `dpkg --compare-versions` reads a hex sha as an arbitrary string —
+so a rebuild of the same branch at a newer commit needs the next `alpha.<N>`,
+not the same one retagged. The ref is resolved once, in its own job, and handed
+to all three arches: three jobs resolving a branch separately can package three
+different trees into one release.
 
-The `2.0.2` in the tag is then just a label. Nothing checks it against what
-upstream's branch actually calls itself, because nothing checks the tag out.
+Why `2.0.3` and not `2.0.2`: upstream released 2.0.2 and `pre-release` has been
+moving ever since, so the package holds code newer than 2.0.2 and has to sort
+above it. `2.0.3~alpha.1` does, and still sits below the eventual `2.0.3`.
+
+The number is only a label, though. Nothing checks the tag against upstream,
+because nothing checks the tag out — and upstream's own branch still declares
+`2.0.2` in `crates/Cargo.toml`, so `qbzd --version` will disagree with
+`dpkg -l` until upstream bumps it. The `+g<sha>` is the part that identifies
+the build.
 
 A tag with **no** suffix ignores the flag entirely and always builds the
 upstream tag of the same name. A stable package comes from an immutable

@@ -67,9 +67,10 @@ jobs:
           DEV_BUILD=false
           if [ -z "${VERSION}" ]; then
             case "${REF}" in
-              # Strip the prerelease suffix so v2.0.2-rc1 builds upstream
-              # v2.0.2, and tilde it in the version so 2.0.2~rc1 sorts BELOW
-              # 2.0.2, unlike a dash-revision. The suffix is also what routes
+              # Strip the prerelease suffix so v2.0.3-alpha.1 builds upstream
+              # v2.0.3, and tilde it in the version so 2.0.3~alpha.1 sorts
+              # BELOW 2.0.3, unlike a dash-revision. The dot is optional
+              # because the odio repos write both. The suffix is what routes
               # the package to the APT repo's testing suite: odio-ci marks the
               # GitHub Release as a prerelease on -rc/-beta/-alpha and nothing
               # else, so those three spellings are the only ones that work.
@@ -81,7 +82,7 @@ jobs:
                       REF="${UPSTREAM_DEV_REF}"
                       DEV_BUILD=true
                     else
-                      REF="$(echo "${REF}" | sed -E 's/-(rc|beta|alpha)[0-9]*$//')"
+                      REF="$(echo "${REF}" | sed -E 's/-(rc|beta|alpha)\.?[0-9]*$//')"
                     fi
                     ;;
                 esac
