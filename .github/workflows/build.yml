@@ -23,10 +23,99 @@ env:
   # What patches/ is written against, and therefore what a branch push builds.
   # The 32-bit fixes live on this branch, not in any tag yet.
   UPSTREAM_DEV_REF: pre-release
+  # While patches/ targets that branch, a PRERELEASE tag builds it too, instead
+  # of the upstream tag its own name implies. Set this to 'false' at the next
+  # upstream release, when patches/ moves back onto a tag; nothing else changes.
+  #
+  # A tag with NO prerelease suffix never takes this path, whatever this says: a
+  # package in the stable suite must come from an immutable upstream tag, and
+  # that is worth enforcing here rather than remembering.
+  PRERELEASE_TRACKS_DEV_REF: 'true'
 
 jobs:
+  # Resolve ONCE, for all three arches. A branch moves, and three jobs each
+  # resolving `pre-release` on their own could package three different trees
+  # into one release if upstream pushes mid-build.
+  resolve:
+    name: Resolve upstream ref
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+      version: ${{ steps.pick.outputs.version }}
+    steps:
+      - name: Resolve
+        id: pick
+        run: |
+          case "${{ github.event_name }}" in
+            workflow_dispatch)
+              REF="${{ github.event.inputs.upstream_ref }}"
+              VERSION="${{ github.event.inputs.version }}"
+              ;;
+            *)
+              if [ "${{ github.ref_type }}" = "tag" ]; then
+                REF="${{ github.ref_name }}"
+              else
+                # Branch push: nothing is published, so build the ref patches/
+                # targets and mark the version as a CI build. 0.0.0 sorts below
+                # every real release, in case one ever escapes as an artifact.
+                REF="${UPSTREAM_DEV_REF}"
+                VERSION="0.0.0+ci.$(echo "${GITHUB_SHA}" | cut -c1-7)"
+              fi
+              ;;
+          esac
+
+          DEV_BUILD=false
+          if [ -z "${VERSION}" ]; then
+            case "${REF}" in
+              # Strip the prerelease suffix so v2.0.2-rc1 builds upstream
+              # v2.0.2, and tilde it in the version so 2.0.2~rc1 sorts BELOW
+              # 2.0.2, unlike a dash-revision. The suffix is also what routes
+              # the package to the APT repo's testing suite: odio-ci marks the
+              # GitHub Release as a prerelease on -rc/-beta/-alpha and nothing
+              # else, so those three spellings are the only ones that work.
+              v[0-9]*)
+                VERSION="$(echo "${REF}" | sed -E 's/^v//; s/-(rc|beta|alpha)/~\1/')"
+                case "${REF}" in
+                  *-rc*|*-beta*|*-alpha*)
+                    if [ "${PRERELEASE_TRACKS_DEV_REF}" = "true" ]; then
+                      REF="${UPSTREAM_DEV_REF}"
+                      DEV_BUILD=true
+                    else
+                      REF="$(echo "${REF}" | sed -E 's/-(rc|beta|alpha)[0-9]*$//')"
+                    fi
+                    ;;
+                esac
+                ;;
+              *)
+                echo "::error::${REF} is not a vX.Y.Z tag, so the version input is required"
+                exit 1
+                ;;
+            esac
+          fi
+
+          # Pin a branch to the commit it names right now. A tag is immutable
+          # and stays a tag: resolving it here would hand actions/checkout the
+          # sha of the tag OBJECT for an annotated tag, which is not a commit.
+          SHA="$(git ls-remote https://github.com/vicrodh/qbz "refs/heads/${REF}" | cut -f1)"
+          if [ -n "${SHA}" ]; then
+            echo "${REF} is a branch, pinned to ${SHA}"
+            # A version built from a moving branch has to say WHICH commit, or
+            # two testing packages a week apart are indistinguishable in
+            # `dpkg -l`. Only on the tag path: a branch push already carries
+            # this repo's sha, and a dispatch carries an explicit version.
+            if [ "${DEV_BUILD}" = "true" ]; then
+              VERSION="${VERSION}+g$(echo "${SHA}" | cut -c1-8)"
+            fi
+            REF="${SHA}"
+          fi
+
+          echo "ref=${REF}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "${{ github.ref_name }} → upstream qbz: ${REF}, deb version: ${VERSION}"
+
   build:
     name: Build ${{ matrix.arch }}
+    needs: resolve
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
 
@@ -57,51 +146,12 @@ jobs:
       - name: Checkout this repo
         uses: actions/checkout@v5
 
-      - name: Resolve upstream ref
-        id: upstream
-        run: |
-          case "${{ github.event_name }}" in
-            workflow_dispatch)
-              REF="${{ github.event.inputs.upstream_ref }}"
-              VERSION="${{ github.event.inputs.version }}"
-              ;;
-            *)
-              if [ "${{ github.ref_type }}" = "tag" ]; then
-                REF="${{ github.ref_name }}"
-              else
-                # Branch push: nothing is published, so build the ref patches/
-                # targets and mark the version as a CI build. 0.0.0 sorts below
-                # every real release, in case one ever escapes as an artifact.
-                REF="${UPSTREAM_DEV_REF}"
-                VERSION="0.0.0+ci.$(git rev-parse --short HEAD)"
-              fi
-              ;;
-          esac
-          if [ -z "${VERSION}" ]; then
-            case "${REF}" in
-              # Strip the prerelease suffix so v2.0.2-rc1 builds upstream
-              # v2.0.2, and tilde it in the version so 2.0.2~rc1 sorts BELOW
-              # 2.0.2, unlike a dash-revision.
-              v[0-9]*)
-                VERSION="$(echo "${REF}" | sed -E 's/^v//; s/-(rc|beta|alpha)/~\1/')"
-                REF="$(echo "${REF}" | sed -E 's/-(rc|beta|alpha)[0-9]*$//')"
-                ;;
-              *)
-                echo "::error::${REF} is not a vX.Y.Z tag, so the version input is required"
-                exit 1
-                ;;
-            esac
-          fi
-          echo "ref=${REF}"         >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "${{ github.ref_name }} → upstream qbz: ${REF}, deb version: ${VERSION}"
-
       # Must land at ./upstream — the Dockerfile does COPY upstream/ /build/.
       - name: Checkout upstream qbz
         uses: actions/checkout@v5
         with:
           repository: vicrodh/qbz
-          ref: ${{ steps.upstream.outputs.ref }}
+          ref: ${{ needs.resolve.outputs.ref }}
           path: upstream
 
       - name: Set up QEMU
@@ -131,7 +181,7 @@ jobs:
         run: |
           ./scripts/build-qbzd-deb.sh \
             --arch ${{ matrix.arch }} \
-            --version ${{ steps.upstream.outputs.version }}
+            --version ${{ needs.resolve.outputs.version }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

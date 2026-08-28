@@ -221,24 +221,56 @@ Tag this repo with the upstream version to release:
 git tag v2.0.2 && git push origin v2.0.2
 ```
 
-A prerelease (routed to the `testing` channel of the APT repo) uses a suffix;
-the underlying upstream tag is the same:
+A prerelease, routed to the APT repo's `testing` suite, uses a suffix:
 
 ```bash
-git tag v2.0.2-rc1 && git push origin v2.0.2-rc1
+git tag v2.0.2-alpha1 && git push origin v2.0.2-alpha1
 ```
 
-The CI strips `-rc<N>`, `-beta<N>`, `-alpha<N>` to resolve the upstream tag,
-turns the suffix into a Debian-sortable `~rc1` in the package version, marks
-the GitHub Release as a prerelease, and dispatches a rebuild of
-`odio-apt-repo`.
+Only `-rc<N>`, `-beta<N>` and `-alpha<N>` work. That spelling is not a style
+choice: `odio-ci` marks the GitHub Release as a prerelease on those three and
+nothing else, and `odio-apt-repo` reads that flag to pick the suite. A
+`-pre1` tag would build and then land in `stable`. The suffix becomes a
+Debian-sortable `~alpha1` in the package version, which sorts below `2.0.2`
+where a dash-revision would sort above.
 
-`watch-upstream.yml` polls `vicrodh/qbz` daily and pushes the tag by itself
-when a new upstream release appears.
+### Prereleases currently build the branch, not the tag
 
-Until the 32-bit fixes reach a tag, `patches/` is written against upstream's
-`pre-release` branch: that is the `UPSTREAM_DEV_REF` a branch push builds, and
-`workflow_dispatch` takes any ref plus an explicit version:
+`patches/` is written against upstream's `pre-release`, so there is no upstream
+tag they apply to. While that holds, `PRERELEASE_TRACKS_DEV_REF` in
+`build.yml` is `true` and a prerelease tag builds `UPSTREAM_DEV_REF` instead of
+the upstream tag its name implies. `v2.0.2-alpha1` gives:
+
+```
+upstream ref   353ed7ff…            (pre-release, resolved to a commit)
+deb version    2.0.2~alpha1+g353ed7ff
+suite          testing
+```
+
+The version carries the upstream commit because a branch moves: without it two
+testing packages a week apart are indistinguishable in `dpkg -l`. The ref is
+resolved once, in its own job, and handed to all three arches — three jobs
+resolving a branch separately can package three different trees into one
+release.
+
+The `2.0.2` in the tag is then just a label. Nothing checks it against what
+upstream's branch actually calls itself, because nothing checks the tag out.
+
+A tag with **no** suffix ignores the flag entirely and always builds the
+upstream tag of the same name. A stable package comes from an immutable
+upstream ref or it does not ship.
+
+To go back to normal at the next upstream release: rebase `patches/` onto the
+new tag, set `PRERELEASE_TRACKS_DEV_REF` to `false`, and prerelease tags
+resolve to their own upstream tag again.
+
+`watch-upstream.yml` polls `vicrodh/qbz` daily and pushes the plain `vX.Y.Z`
+tag by itself when a new upstream release appears — which is also the alarm
+clock for the paragraph above: that build takes the stable path, so it fails
+loudly if `patches/` has not moved onto the tag yet.
+
+`workflow_dispatch` still takes any ref plus an explicit version, and publishes
+nothing:
 
 ```bash
 gh workflow run build.yml -f upstream_ref=pre-release -f version=2.0.2+pre.1
