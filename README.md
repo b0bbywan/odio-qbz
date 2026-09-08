@@ -173,6 +173,18 @@ portability, and the desktop app is what gets exercised day to day:
   [fork branch](https://github.com/b0bbywan/rodio/tree/cpal-0.19): rodio master
   plus the one-line `cpal = "0.19"` bump upstream will make itself at the cpal
   release. Both pins drop together once cpal 0.19 is out and rodio requires it.
+- `0005-mpris-implement-shuffle-and-loopstatus.patch` — the MPRIS `Shuffle`
+  and `LoopStatus` properties were published but stubbed: always `false` /
+  `None`, and writes were dropped, so a media widget showed buttons that did
+  nothing. The core already had the setters and emitted the change events;
+  the patch stores both in the MPRIS state, forwards writes, and wires qbzd
+  (seed + bus). Taken from
+  [b0bbywan/qbz@267ee043](https://github.com/b0bbywan/qbz/commit/267ee043)
+  (branch `bugfix/external/mpris-shuffle-loop`), not yet submitted upstream.
+  Daemon side only: the original carried the desktop too, and the Qt port that
+  replaced it exposes toggle/cycle steps where an MPRIS write carries a target,
+  so `qbz-qt` names both events and drops them rather than flipping the wrong
+  way. This package compiles neither.
 
 0002 and 0003 carry `Cargo.lock`, because the build runs `--locked`.
 
@@ -185,10 +197,11 @@ it added a new file and its two anchors still matched, so the apply gate
 would have shipped two publishers and doubled every scrobble.
 
 Patches are applied on **every** arch: 0002 is a packaging choice wanted
-everywhere and 0003 is the same dependency graph everywhere. Scoping either to
-armhf would only mean shipping three binaries built from two different sources,
-and for 0002 it would leave the 64-bit packages declaring a `libssl3` dependency
-they do not link.
+everywhere, 0003 is the same dependency graph everywhere, and 0005 is a
+daemon bug that has nothing to do with the CPU. Scoping any of them to armhf would
+only mean shipping three binaries built from two different sources, and for
+0002 it would leave the 64-bit packages declaring a `libssl3` dependency they
+do not link.
 
 A patch that no longer applies **fails the build** rather than being skipped —
 that means either upstream fixed it (delete the patch) or the code moved

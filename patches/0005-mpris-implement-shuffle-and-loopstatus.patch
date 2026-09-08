@@ -1,0 +1,319 @@
+fix(media-controls): implement MPRIS Shuffle and LoopStatus
+
+qbz-media-controls published both properties but the handlers were stubs:
+`Shuffle` always read false, `LoopStatus` always `None`, and both setters
+returned Ok without doing anything. With `CanControl=true` a KDE/GNOME
+widget shows the buttons, swallows the clicks and displays a state that
+never matches the queue. Affects the desktop and qbzd alike, since they
+share the crate.
+
+Everything below the crate already existed: QbzCore has set_shuffle and
+set_repeat_mode, QueueState carries shuffle/repeat, RepeatMode maps 1:1
+onto LoopStatus (Off/All/One -> None/Playlist/Track), and the core emits
+ShuffleChanged / RepeatModeChanged on the bus.
+
+qbz-media-controls
+  LoopMode + MediaEvent::{SetShuffle, SetLoop}; MediaIntegration gains
+  set_shuffle / set_loop with default no-ops (SMTC and MediaRemote have no
+  such property). The MPRIS backend keeps both in State, answers the getters
+  from it, emits PropertiesChanged on push and forwards writes as events.
+
+qbzd
+  Seeds both from get_queue_state, follows ShuffleChanged /
+  RepeatModeChanged on the bus, and applies writes via the core's async
+  setters spawned off the D-Bus thread.
+
+qbz-qt (desktop)
+  Not wired, and deliberately so. The desktop this patch first covered is
+  gone — the Qt port replaced `crates/qbz` wholesale — and an MPRIS write
+  carries a TARGET where the only Qt entry points are the toggle/cycle steps
+  (`transport_toggle_shuffle`, `transport_cycle_repeat`), which flip the
+  wrong way whenever the target already matches. Targeted setters behind the
+  Qt QConnect gate are desktop work, not a rebase, so `dispatch` drops both
+  events under a named arm rather than by accident. The getters still report
+  the queue, and the daemon — the only binary this tree ships — applies them.
+
+Verified: `cargo check --locked` on qbz-media-controls and qbzd. The desktop
+crate was not compiled locally.
+
+Taken from the fork branch b0bbywan/qbz:bugfix/external/mpris-shuffle-loop
+(267ee043), written against upstream pre-release at 82fea625 and rebased
+onto v2.1.0 daemon-side only. v2.1.0 still stubs both properties; its new
+macOS/Windows backend (platform.rs) takes the trait's default no-ops, and
+Linux does not go through it. Drops once upstream merges it.
+
+diff --git a/crates/qbz-media-controls/src/lib.rs b/crates/qbz-media-controls/src/lib.rs
+index 8c9fb914..657d439d 100644
+--- a/crates/qbz-media-controls/src/lib.rs
++++ b/crates/qbz-media-controls/src/lib.rs
+@@ -13,7 +13,7 @@
+ use std::sync::Arc;
+ 
+ mod types;
+-pub use types::{xesam_url_for, MediaEvent, MediaIntegration, PlaybackStatus, TrackMeta};
++pub use types::{xesam_url_for, LoopMode, MediaEvent, MediaIntegration, PlaybackStatus, TrackMeta};
+ 
+ pub mod notify;
+ pub use notify::{show_track_notification, withdraw_track_notification, NotificationMeta};
+diff --git a/crates/qbz-media-controls/src/linux.rs b/crates/qbz-media-controls/src/linux.rs
+index 7fabf724..edf6e302 100644
+--- a/crates/qbz-media-controls/src/linux.rs
++++ b/crates/qbz-media-controls/src/linux.rs
+@@ -24,7 +24,7 @@ use mpris_server::{
+ };
+ 
+ use crate::inhibit::SleepInhibitor;
+-use crate::types::{MediaEvent, MediaIntegration, PlaybackStatus, TrackMeta};
++use crate::types::{LoopMode, MediaEvent, MediaIntegration, PlaybackStatus, TrackMeta};
+ 
+ const BUS_SUFFIX: &str = "com.blitzfc.qbz";
+ const DESKTOP_ENTRY: &str = "com.blitzfc.qbz";
+@@ -53,6 +53,8 @@ struct State {
+     /// to choose between a stale clock and a faster poll it does not want.
+     position: Time,
+     stamped: std::time::Instant,
++    shuffle: bool,
++    loop_status: LoopStatus,
+ }
+ 
+ /// Update commands sent from the app to the server thread.
+@@ -72,6 +74,8 @@ enum Update {
+     /// client to stop extrapolating and re-read. Without it a widget keeps
+     /// counting from wherever it was until it happens to poll again.
+     Seeked(Time),
++    Shuffle(bool),
++    Loop(LoopStatus),
+ }
+ 
+ /// The cloneable handle returned to the app. Pushing state is a non-blocking
+@@ -107,6 +111,30 @@ impl MediaIntegration for LinuxHandle {
+             .tx
+             .try_send(Update::Seeked(Time::from_micros(position.as_micros() as i64)));
+     }
++
++    fn set_shuffle(&self, on: bool) {
++        let _ = self.tx.try_send(Update::Shuffle(on));
++    }
++
++    fn set_loop(&self, mode: LoopMode) {
++        let _ = self.tx.try_send(Update::Loop(map_loop(mode)));
++    }
++}
++
++fn map_loop(m: LoopMode) -> LoopStatus {
++    match m {
++        LoopMode::Off => LoopStatus::None,
++        LoopMode::All => LoopStatus::Playlist,
++        LoopMode::One => LoopStatus::Track,
++    }
++}
++
++fn unmap_loop(s: LoopStatus) -> LoopMode {
++    match s {
++        LoopStatus::None => LoopMode::Off,
++        LoopStatus::Playlist => LoopMode::All,
++        LoopStatus::Track => LoopMode::One,
++    }
+ }
+ 
+ fn map_status(s: PlaybackStatus) -> MprisStatus {
+@@ -236,9 +264,10 @@ impl PlayerInterface for QbzMpris {
+         Ok(self.state.lock().unwrap().status)
+     }
+     async fn loop_status(&self) -> fdo::Result<LoopStatus> {
+-        Ok(LoopStatus::None)
++        Ok(self.state.lock().unwrap().loop_status)
+     }
+-    async fn set_loop_status(&self, _loop_status: LoopStatus) -> zbus::Result<()> {
++    async fn set_loop_status(&self, loop_status: LoopStatus) -> zbus::Result<()> {
++        self.emit(MediaEvent::SetLoop(unmap_loop(loop_status)));
+         Ok(())
+     }
+     async fn rate(&self) -> fdo::Result<PlaybackRate> {
+@@ -248,9 +277,10 @@ impl PlayerInterface for QbzMpris {
+         Ok(())
+     }
+     async fn shuffle(&self) -> fdo::Result<bool> {
+-        Ok(false)
++        Ok(self.state.lock().unwrap().shuffle)
+     }
+-    async fn set_shuffle(&self, _shuffle: bool) -> zbus::Result<()> {
++    async fn set_shuffle(&self, shuffle: bool) -> zbus::Result<()> {
++        self.emit(MediaEvent::SetShuffle(shuffle));
+         Ok(())
+     }
+     async fn metadata(&self) -> fdo::Result<Metadata> {
+@@ -348,6 +378,14 @@ async fn apply(server: &Server<QbzMpris>, state: &Arc<Mutex<State>>, update: Upd
+             }
+             let _ = server.emit(Signal::Seeked { position: p }).await;
+         }
++        Update::Shuffle(on) => {
++            state.lock().unwrap().shuffle = on;
++            let _ = server.properties_changed([Property::Shuffle(on)]).await;
++        }
++        Update::Loop(l) => {
++            state.lock().unwrap().loop_status = l;
++            let _ = server.properties_changed([Property::LoopStatus(l)]).await;
++        }
+     }
+ }
+ 
+@@ -377,6 +415,8 @@ pub fn spawn(on_event: EventCb) -> Option<LinuxHandle> {
+                     volume: 1.0,
+                     position: Time::ZERO,
+                     stamped: std::time::Instant::now(),
++                    shuffle: false,
++                    loop_status: LoopStatus::None,
+                 }));
+                 let imp = QbzMpris {
+                     on_event,
+diff --git a/crates/qbz-media-controls/src/types.rs b/crates/qbz-media-controls/src/types.rs
+index 4a34abeb..bb03ceb8 100644
+--- a/crates/qbz-media-controls/src/types.rs
++++ b/crates/qbz-media-controls/src/types.rs
+@@ -42,6 +42,16 @@ pub enum PlaybackStatus {
+     Stopped,
+ }
+ 
++/// Queue repeat mode as the OS controls see it (MPRIS `LoopStatus`).
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum LoopMode {
++    Off,
++    /// Repeat the whole queue (`LoopStatus=Playlist`).
++    All,
++    /// Repeat the current track (`LoopStatus=Track`).
++    One,
++}
++
+ /// Inbound events from the OS media controls (media keys, GNOME/KDE widget,
+ /// macOS Now Playing, Windows SMTC). Delivered to the callback passed to
+ /// [`crate::spawn`]. All time values are MICROSECONDS.
+@@ -59,6 +69,10 @@ pub enum MediaEvent {
+     SetPosition(i64),
+     /// Set volume 0.0..=1.0.
+     SetVolume(f64),
++    /// MPRIS `Shuffle` property write.
++    SetShuffle(bool),
++    /// MPRIS `LoopStatus` property write.
++    SetLoop(LoopMode),
+     Raise,
+     Quit,
+ }
+@@ -105,4 +119,11 @@ pub trait MediaIntegration: Send + Sync {
+     fn seeked(&self, position: Duration) {
+         self.set_position(position);
+     }
++
++    /// Reflect the queue's shuffle flag. Default no-op: SMTC/MediaRemote have
++    /// no such property, only the MPRIS backend overrides this.
++    fn set_shuffle(&self, _on: bool) {}
++
++    /// Reflect the queue's repeat mode. Default no-op, as for `set_shuffle`.
++    fn set_loop(&self, _mode: LoopMode) {}
+ }
+diff --git a/crates/qbz-qt/src/media_controls_qt.rs b/crates/qbz-qt/src/media_controls_qt.rs
+index 9035f188..6911d24c 100644
+--- a/crates/qbz-qt/src/media_controls_qt.rs
++++ b/crates/qbz-qt/src/media_controls_qt.rs
+@@ -584,6 +584,14 @@ fn dispatch(ev: MediaEvent) {
+         MediaEvent::SetVolume(v) => crate::transport_set_volume((v as f32).clamp(0.0, 1.0)),
+         MediaEvent::SetPosition(micros) => seek_to_micros(micros),
+         MediaEvent::SeekBy(delta_micros) => seek_by_micros(delta_micros),
++        // Inbound Shuffle/LoopStatus writes carry a TARGET, while the only Qt
++        // entry points are the toggle/cycle steps (`transport_toggle_shuffle`,
++        // `transport_cycle_repeat`), which would flip the wrong way half the
++        // time. Wiring targeted setters through the QConnect gate is the
++        // desktop half of this patch and is not done here; the daemon, which
++        // is what this tree ships, applies both. Dropping the events is the
++        // honest behaviour until then — the getters still report the queue.
++        MediaEvent::SetShuffle(_) | MediaEvent::SetLoop(_) => {}
+     }
+ }
+ 
+diff --git a/crates/qbzd/src/mpris.rs b/crates/qbzd/src/mpris.rs
+index ea7835fb..64faf9a7 100644
+--- a/crates/qbzd/src/mpris.rs
++++ b/crates/qbzd/src/mpris.rs
+@@ -24,8 +24,8 @@ use std::sync::{Arc, Weak};
+ use std::time::Duration;
+ 
+ use qbz_app::shell::AppRuntime;
+-use qbz_media_controls::{MediaEvent, MediaIntegration, PlaybackStatus, TrackMeta};
+-use qbz_models::{CoreEvent, PlaybackState, QueueTrack};
++use qbz_media_controls::{LoopMode, MediaEvent, MediaIntegration, PlaybackStatus, TrackMeta};
++use qbz_models::{CoreEvent, PlaybackState, QueueTrack, RepeatMode};
+ use tokio::runtime::Handle;
+ use tokio::sync::broadcast;
+ use tokio::task::JoinHandle;
+@@ -114,6 +114,8 @@ pub fn spawn(
+             if let Some(track) = queue.current_track.as_ref() {
+                 updater_integ.set_metadata(&track_meta(track));
+             }
++            updater_integ.set_shuffle(queue.shuffle);
++            updater_integ.set_loop(map_repeat(queue.repeat));
+             let player = rt.core().player();
+             let ev = player.get_playback_event();
+             last = if ev.is_playing {
+@@ -148,6 +150,8 @@ pub fn spawn(
+                     }
+                 }
+                 Ok(CoreEvent::VolumeChanged { volume }) => updater_integ.set_volume(volume as f64),
++                Ok(CoreEvent::ShuffleChanged { enabled }) => updater_integ.set_shuffle(enabled),
++                Ok(CoreEvent::RepeatModeChanged { mode }) => updater_integ.set_loop(map_repeat(mode)),
+                 Ok(_) => {}
+                 Err(RecvError::Lagged(_)) => continue,
+                 Err(RecvError::Closed) => return,
+@@ -252,6 +256,16 @@ fn handle_media_event(
+                 let _ = core.set_volume((vol as f32).clamp(0.0, 1.0));
+             }
+         }
++        // Queue-mode writes are async on the core (queue RwLock): spawn them so
++        // the D-Bus thread never blocks on the lock.
++        MediaEvent::SetShuffle(on) => {
++            let rt = rt.clone();
++            handle.spawn(async move { rt.core().set_shuffle(on).await });
++        }
++        MediaEvent::SetLoop(mode) => {
++            let rt = rt.clone();
++            handle.spawn(async move { rt.core().set_repeat_mode(unmap_repeat(mode)).await });
++        }
+         // Headless daemon: no window to raise, and self-quit on a media-widget
+         // "close" would be surprising — ignore both.
+         MediaEvent::Raise | MediaEvent::Quit => {}
+@@ -291,6 +305,22 @@ fn track_meta(t: &QueueTrack) -> TrackMeta {
+     }
+ }
+ 
++fn map_repeat(m: RepeatMode) -> LoopMode {
++    match m {
++        RepeatMode::Off => LoopMode::Off,
++        RepeatMode::All => LoopMode::All,
++        RepeatMode::One => LoopMode::One,
++    }
++}
++
++fn unmap_repeat(m: LoopMode) -> RepeatMode {
++    match m {
++        LoopMode::Off => RepeatMode::Off,
++        LoopMode::All => RepeatMode::All,
++        LoopMode::One => RepeatMode::One,
++    }
++}
++
+ fn map_state(s: PlaybackState) -> PlaybackStatus {
+     match s {
+         PlaybackState::Playing => PlaybackStatus::Playing,
+@@ -305,6 +335,13 @@ fn map_state(s: PlaybackState) -> PlaybackStatus {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn repeat_and_loop_round_trip() {
++        for m in [RepeatMode::Off, RepeatMode::All, RepeatMode::One] {
++            assert_eq!(unmap_repeat(map_repeat(m)), m);
++        }
++    }
++
+     #[test]
+     fn map_state_covers_every_playback_state() {
+         assert_eq!(map_state(PlaybackState::Playing), PlaybackStatus::Playing);
