@@ -1,0 +1,78 @@
+# qbzd — daemon-only .deb. Upstream's own nfpm config ships the GUI binary in
+# the same package; see the README for the comparison.
+#
+# Env from scripts/build-qbzd-deb.sh: QBZD_VERSION, QBZD_ARCH, QBZD_LIBC_MIN.
+# contents[].src are relative — nfpm runs from the staging dir, so src needs no
+# interpolation.
+
+name: qbzd
+arch: ${QBZD_ARCH}
+platform: linux
+version: ${QBZD_VERSION}
+section: sound
+priority: optional
+maintainer: "Mathieu Réquillart <mathieu.requillart@gmail.com>"
+description: |
+  QBZ headless Qobuz playback daemon.
+  Turns a Linux box into a bit-perfect Qobuz Connect endpoint. Daemon, CLI
+  client and setup TUI in one binary; no desktop or GUI runtime required.
+vendor: Odio
+homepage: https://github.com/vicrodh/qbz
+license: MIT
+
+contents:
+  - src: ./qbzd
+    dst: /usr/bin/qbzd
+    file_info:
+      mode: 0755
+
+  # Upstream's user unit, verbatim and not enabled. Headless boxes also need
+  # `loginctl enable-linger`, which the unit header and `qbzd status` spell out.
+  - src: ./qbzd.service
+    dst: /usr/lib/systemd/user/qbzd.service
+
+  - src: ./completions/qbzd.bash
+    dst: /usr/share/bash-completion/completions/qbzd
+  - src: ./completions/qbzd.zsh
+    dst: /usr/share/zsh/vendor-completions/_qbzd
+  - src: ./completions/qbzd.fish
+    dst: /usr/share/fish/vendor_completions.d/qbzd.fish
+
+  - src: ./README.md
+    dst: /usr/share/doc/qbzd/README.md
+  - src: ./LICENSE
+    dst: /usr/share/doc/qbzd/copyright
+
+overrides:
+  deb:
+    depends:
+      # Measured NEEDED set: libasound, libc, libgcc_s, libm. The builder prints
+      # it on every build. PipeWire is reached through its ALSA shim. The t64
+      # name is Debian's 64-bit time_t rename and is what every build target
+      # ships; the old name stays as an alternative for derivatives that kept
+      # it — it is a name, not a compatibility guard.
+      - libasound2t64 | libasound2
+      # The only thing that actually keeps a package off the release it was not
+      # built for. Every arch builds on trixie, so it is 2.41 for all three.
+      - libc6 (>= ${QBZD_LIBC_MIN})
+      # patches/0002 links the system OpenSSL.
+      - libssl3t64 | libssl3
+    recommends:
+      # MPRIS over D-Bus (zbus, so no link-time dep); missing it just disables
+      # media-control integration.
+      - dbus
+    suggests:
+      # jack-sys resolves libjack at runtime — not in NEEDED — so JACK is only
+      # needed if you actually route qbzd through it.
+      - libjack-jackd2-0 | libjack0
+    # Upstream's `qbz` deb installs the same /usr/bin/qbzd and unit file.
+    conflicts:
+      - qbz
+    replaces:
+      - qbz
+    provides:
+      - qbzd
+
+deb:
+  # xz rather than zstd: every reprepro version handles it, and 9 MB either way.
+  compression: xz

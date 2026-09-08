@@ -1,0 +1,26 @@
+# Thin caller; the logic lives in b0bbywan/odio-ci. The schedule stays here —
+# a reusable workflow cannot carry its own trigger — and cron minutes are
+# staggered across the repos.
+name: Watch upstream qbz
+
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only log, do not push tag'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    uses: b0bbywan/odio-ci/.github/workflows/watch-upstream.yml@v1.0.3
+    with:
+      upstream_repo: vicrodh/qbz
+      dry_run: ${{ inputs.dry_run || false }}
+    secrets:
+      release_pat: ${{ secrets.RELEASE_PAT }}
