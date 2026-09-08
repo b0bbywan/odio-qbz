@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # Also bumps the odio-ci pins: it has no floating major alias by design.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

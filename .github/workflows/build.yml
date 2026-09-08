@@ -1,0 +1,204 @@
+name: Build
+
+on:
+  push:
+    tags: ['v*']
+    # Branch pushes build UPSTREAM_DEV_REF and publish nothing — the
+    # release/dispatch jobs are tag-only. This is how the pipeline gets
+    # exercised before a tag is cut.
+    branches: ['**']
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Upstream qbz ref to build — tag, branch or sha (e.g. v2.1.0, pre-release)'
+        required: true
+      version:
+        description: 'Package version; required unless the ref is a vX.Y.Z tag'
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  # What patches/ is written against, and therefore what a branch push builds.
+  UPSTREAM_DEV_REF: v2.1.0
+  # 'true' only while patches/ targets a moving upstream branch: a PRERELEASE
+  # tag then builds UPSTREAM_DEV_REF instead of the upstream tag its own name
+  # implies, and UPSTREAM_DEV_REF names that branch.
+  #
+  # A tag with NO prerelease suffix never takes this path, whatever this says: a
+  # package in the stable suite must come from an immutable upstream tag, and
+  # that is worth enforcing here rather than remembering.
+  PRERELEASE_TRACKS_DEV_REF: 'false'
+
+jobs:
+  # Resolve ONCE, for all three arches. A branch moves, and three jobs each
+  # resolving it on their own could package three different trees into one
+  # release if upstream pushes mid-build.
+  resolve:
+    name: Resolve upstream ref
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+      version: ${{ steps.pick.outputs.version }}
+    steps:
+      - name: Resolve
+        id: pick
+        run: |
+          case "${{ github.event_name }}" in
+            workflow_dispatch)
+              REF="${{ github.event.inputs.upstream_ref }}"
+              VERSION="${{ github.event.inputs.version }}"
+              ;;
+            *)
+              if [ "${{ github.ref_type }}" = "tag" ]; then
+                REF="${{ github.ref_name }}"
+              else
+                # Branch push: nothing is published, so build the ref patches/
+                # targets and mark the version as a CI build. 0.0.0 sorts below
+                # every real release, in case one ever escapes as an artifact.
+                REF="${UPSTREAM_DEV_REF}"
+                VERSION="0.0.0+ci.$(echo "${GITHUB_SHA}" | cut -c1-7)"
+              fi
+              ;;
+          esac
+
+          DEV_BUILD=false
+          if [ -z "${VERSION}" ]; then
+            case "${REF}" in
+              # Strip the prerelease suffix so v2.0.3-alpha.1 builds upstream
+              # v2.0.3, and tilde it in the version so 2.0.3~alpha.1 sorts
+              # BELOW 2.0.3, unlike a dash-revision. The dot is optional
+              # because the odio repos write both. The suffix is what routes
+              # the package to the APT repo's testing suite: odio-ci marks the
+              # GitHub Release as a prerelease on -rc/-beta/-alpha and nothing
+              # else, so those three spellings are the only ones that work.
+              v[0-9]*)
+                VERSION="$(echo "${REF}" | sed -E 's/^v//; s/-(rc|beta|alpha)/~\1/')"
+                case "${REF}" in
+                  *-rc*|*-beta*|*-alpha*)
+                    if [ "${PRERELEASE_TRACKS_DEV_REF}" = "true" ]; then
+                      REF="${UPSTREAM_DEV_REF}"
+                      DEV_BUILD=true
+                    else
+                      REF="$(echo "${REF}" | sed -E 's/-(rc|beta|alpha)\.?[0-9]*$//')"
+                    fi
+                    ;;
+                esac
+                ;;
+              *)
+                echo "::error::${REF} is not a vX.Y.Z tag, so the version input is required"
+                exit 1
+                ;;
+            esac
+          fi
+
+          # Pin a branch to the commit it names right now. A tag is immutable
+          # and stays a tag: resolving it here would hand actions/checkout the
+          # sha of the tag OBJECT for an annotated tag, which is not a commit.
+          SHA="$(git ls-remote https://github.com/vicrodh/qbz "refs/heads/${REF}" | cut -f1)"
+          if [ -n "${SHA}" ]; then
+            echo "${REF} is a branch, pinned to ${SHA}"
+            # A version built from a moving branch has to say WHICH commit, or
+            # two testing packages a week apart are indistinguishable in
+            # `dpkg -l`. Only on the tag path: a branch push already carries
+            # this repo's sha, and a dispatch carries an explicit version.
+            if [ "${DEV_BUILD}" = "true" ]; then
+              VERSION="${VERSION}+g$(echo "${SHA}" | cut -c1-8)"
+            fi
+            REF="${SHA}"
+          fi
+
+          echo "ref=${REF}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "${{ github.ref_name }} → upstream qbz: ${REF}, deb version: ${VERSION}"
+
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            qemu: false
+            timeout: 60
+          # Native arm64 runner — no emulation, so this is as cheap as amd64.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            qemu: false
+            timeout: 60
+          # armhf is arm/v6 in a Raspberry Pi OS rootfs (see
+          # docker/builder.Dockerfile for why cross-compiling is not an
+          # option). GitHub's arm64 runners are Neoverse-based and cannot
+          # execute AArch32, so this is QEMU either way — and emulating a
+          # 381-crate Rust build takes hours, hence the timeout.
+          - arch: armhf
+            runner: ubuntu-latest
+            qemu: true
+            timeout: 350
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v5
+
+      # Must land at ./upstream — the Dockerfile does COPY upstream/ /build/.
+      - name: Checkout upstream qbz
+        uses: actions/checkout@v5
+        with:
+          repository: vicrodh/qbz
+          ref: ${{ needs.resolve.outputs.ref }}
+          path: upstream
+
+      - name: Set up QEMU
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Install nfpm
+        run: |
+          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' \
+            | sudo tee /etc/apt/sources.list.d/goreleaser.list
+          sudo apt-get update
+          sudo apt-get install -y nfpm
+          nfpm --version
+
+      - name: Build .deb
+        env:
+          # Caches the apt + rustup + cargo layers across runs, which matters
+          # most for the emulated armhf job.
+          BUILDX_CACHE_ARGS: >-
+            --cache-from type=gha,scope=${{ matrix.arch }}
+            --cache-to type=gha,scope=${{ matrix.arch }},mode=max
+        run: |
+          ./scripts/build-qbzd-deb.sh \
+            --arch ${{ matrix.arch }} \
+            --version ${{ needs.resolve.outputs.version }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: qbzd-${{ matrix.arch }}-deb
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Release and reindex
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    uses: b0bbywan/odio-ci/.github/workflows/release.yml@v1.0.3
+    with:
+      artifact_pattern: qbzd-*-deb
+    secrets:
+      apt_repo_token: ${{ secrets.APT_REPO_TOKEN }}
