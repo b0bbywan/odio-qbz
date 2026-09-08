@@ -144,11 +144,11 @@ jobs:
 
     steps:
       - name: Checkout this repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Must land at ./upstream — the Dockerfile does COPY upstream/ /build/.
       - name: Checkout upstream qbz
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: vicrodh/qbz
           ref: ${{ needs.resolve.outputs.ref }}
