@@ -184,7 +184,7 @@ jobs:
             --version ${{ needs.resolve.outputs.version }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: qbzd-${{ matrix.arch }}-deb
           path: dist/*.deb
