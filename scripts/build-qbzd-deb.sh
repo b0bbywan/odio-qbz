@@ -5,7 +5,7 @@
 # staged payload, run nfpm on it.
 #
 # Usage:
-#   build-qbzd-deb.sh --arch <amd64|arm64|armhf> --version <2.1.0>
+#   build-qbzd-deb.sh --arch <amd64|arm64|armhf> --version <2.1.1>
 #                     [--src ./upstream] [--out ./dist]
 #
 # Needs docker with buildx and nfpm on the host, plus binfmt for any arch the

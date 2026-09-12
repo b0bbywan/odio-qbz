@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: 'Upstream qbz ref to build — tag, branch or sha (e.g. v2.1.0, pre-release)'
+        description: 'Upstream qbz ref to build — tag, branch or sha (e.g. v2.1.1, pre-release)'
         required: true
       version:
         description: 'Package version; required unless the ref is a vX.Y.Z tag'
@@ -21,7 +21,7 @@ permissions:
 
 env:
   # What patches/ is written against, and therefore what a branch push builds.
-  UPSTREAM_DEV_REF: v2.1.0
+  UPSTREAM_DEV_REF: v2.1.1
   # 'true' only while patches/ targets a moving upstream branch: a PRERELEASE
   # tag then builds UPSTREAM_DEV_REF instead of the upstream tag its own name
   # implies, and UPSTREAM_DEV_REF names that branch.

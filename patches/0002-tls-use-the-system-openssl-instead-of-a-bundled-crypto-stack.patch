@@ -41,17 +41,17 @@ does not otherwise touch. rustls also stays in the lock as a NORMAL
 dependency of the vendored rust_cast, but only qbz-qt reaches it (through
 qbz-cast); the daemon does not.
 
-Verified on v2.1.0: `cargo tree --locked -p qbzd -e normal` resolves no
+Verified on v2.1.1: `cargo tree --locked -p qbzd -e normal` resolves no
 ring, no aws-lc-sys and no rustls, and reaches openssl-sys through
 native-tls; `cargo check --locked -p qbzd` passes. Cargo.lock is included
 because the build runs --locked; the re-resolve adds and removes packages
 and bumps nothing.
 
 diff --git a/crates/Cargo.lock b/crates/Cargo.lock
-index 14a20342..3a4c3787 100644
+index 0b2628f4..10adec5e 100644
 --- a/crates/Cargo.lock
 +++ b/crates/Cargo.lock
-@@ -912,7 +912,7 @@ dependencies = [
+@@ -882,7 +882,7 @@ dependencies = [
   "alsa",
   "coreaudio-rs",
   "dasp_sample",
@@ -60,7 +60,7 @@ index 14a20342..3a4c3787 100644
   "js-sys",
   "libc",
   "mach2",
-@@ -2188,17 +2188,18 @@ dependencies = [
+@@ -2115,17 +2115,18 @@ dependencies = [
  ]
  
  [[package]]
@@ -85,7 +85,7 @@ index 14a20342..3a4c3787 100644
   "tower-service",
  ]
  
-@@ -2613,36 +2614,6 @@ dependencies = [
+@@ -2540,36 +2541,6 @@ dependencies = [
   "windows-sys 0.45.0",
  ]
  
@@ -122,7 +122,7 @@ index 14a20342..3a4c3787 100644
  [[package]]
  name = "jni-sys"
  version = "0.3.1"
-@@ -3073,6 +3044,23 @@ dependencies = [
+@@ -3000,6 +2971,23 @@ dependencies = [
   "zbus 5.19.0",
  ]
  
@@ -146,7 +146,7 @@ index 14a20342..3a4c3787 100644
  [[package]]
  name = "ndk"
  version = "0.9.0"
-@@ -3563,12 +3551,49 @@ dependencies = [
+@@ -3456,12 +3444,49 @@ dependencies = [
   "libc",
  ]
  
@@ -196,7 +196,7 @@ index 14a20342..3a4c3787 100644
  [[package]]
  name = "option-ext"
  version = "0.2.0"
-@@ -4072,7 +4097,6 @@ dependencies = [
+@@ -3944,7 +3969,6 @@ dependencies = [
   "rand 0.10.2",
   "reqwest",
   "rusqlite",
@@ -204,7 +204,7 @@ index 14a20342..3a4c3787 100644
   "serde",
   "serde_json",
   "tempfile",
-@@ -5114,21 +5138,20 @@ dependencies = [
+@@ -4988,21 +5012,20 @@ dependencies = [
   "http-body",
   "http-body-util",
   "hyper",
@@ -229,7 +229,7 @@ index 14a20342..3a4c3787 100644
   "tokio-util",
   "tower",
   "tower-http",
-@@ -5371,33 +5394,6 @@ dependencies = [
+@@ -5243,33 +5266,6 @@ dependencies = [
   "zeroize",
  ]
  
@@ -263,7 +263,7 @@ index 14a20342..3a4c3787 100644
  [[package]]
  name = "rustls-webpki"
  version = "0.103.15"
-@@ -5681,22 +5677,6 @@ version = "0.3.10"
+@@ -5553,22 +5549,6 @@ version = "0.3.10"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
  
@@ -286,7 +286,7 @@ index 14a20342..3a4c3787 100644
  [[package]]
  name = "siphasher"
  version = "1.0.3"
-@@ -6354,12 +6334,12 @@ dependencies = [
+@@ -6226,12 +6206,12 @@ dependencies = [
  ]
  
  [[package]]
@@ -303,7 +303,7 @@ index 14a20342..3a4c3787 100644
   "tokio",
  ]
  
-@@ -6383,12 +6363,10 @@ checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
+@@ -6255,12 +6235,10 @@ checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
  dependencies = [
   "futures-util",
   "log",
@@ -318,7 +318,7 @@ index 14a20342..3a4c3787 100644
  ]
  
  [[package]]
-@@ -6604,9 +6582,8 @@ dependencies = [
+@@ -6465,9 +6443,8 @@ dependencies = [
   "http",
   "httparse",
   "log",
@@ -329,7 +329,7 @@ index 14a20342..3a4c3787 100644
   "sha1 0.11.0",
   "thiserror 2.0.20",
  ]
-@@ -6963,33 +6940,6 @@ dependencies = [
+@@ -6754,33 +6731,6 @@ dependencies = [
   "wasm-bindgen",
  ]
  
@@ -364,7 +364,7 @@ index 14a20342..3a4c3787 100644
  name = "weezl"
  version = "0.1.12"
 diff --git a/crates/Cargo.toml b/crates/Cargo.toml
-index 75964154..af623753 100644
+index bc8c3255..48cbe284 100644
 --- a/crates/Cargo.toml
 +++ b/crates/Cargo.toml
 @@ -82,7 +82,7 @@ serde = { version = "1", features = ["derive"] }
@@ -432,7 +432,7 @@ index 6ed3fcc0..6ab0297a 100644
      }
  
 diff --git a/crates/qbz-integrations/Cargo.toml b/crates/qbz-integrations/Cargo.toml
-index 558f0599..c1aabb3e 100644
+index 5fc0b89e..8cf9199a 100644
 --- a/crates/qbz-integrations/Cargo.toml
 +++ b/crates/qbz-integrations/Cargo.toml
 @@ -10,7 +10,7 @@ license = "MIT"
@@ -457,10 +457,10 @@ index 7e2e60f6..b1bbfd45 100644
          let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
          let address = listener.local_addr().unwrap();
 diff --git a/crates/qbz-qt/src/main.rs b/crates/qbz-qt/src/main.rs
-index 34c404bc..82782315 100644
+index 48b3942e..d597ffaf 100644
 --- a/crates/qbz-qt/src/main.rs
 +++ b/crates/qbz-qt/src/main.rs
-@@ -3876,10 +3876,6 @@ fn main() {
+@@ -3900,10 +3900,6 @@ fn main() {
      // post-login screen writes read it (:489, :565).
      kiosk_profile_qt::init_at_boot();
  

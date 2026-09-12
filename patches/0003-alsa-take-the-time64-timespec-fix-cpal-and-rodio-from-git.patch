@@ -31,39 +31,72 @@ force-pushed and then squash-merged, so none of its branch commits landed on
 master — which left the pin one GitHub gc away from breaking every arch at
 once. A master rev cannot disappear.
 
-rodio is the reason a fork enters the picture. Released rodio 0.22.2 and
-rodio master both require cpal ^0.18, which a 0.19.0 cpal cannot satisfy,
-and cargo's fallback for an unmatched [patch] would resolve rodio's cpal
-from crates.io — a second cpal/alsa-sys pair, which `links = "alsa"`
-forbids. So rodio comes from b0bbywan/rodio branch `cpal-0.19`: rodio
-master (880aaba) plus the one-line `cpal = "0.19"` bump upstream will make
-itself when cpal 0.19 releases. It still declares version 0.22.2, so qbz's
-`rodio = "0.22"` requirement is unchanged.
+rodio is the reason a fork enters the picture. qbz never names cpal: it asks
+for `rodio = "0.22"` and takes whatever cpal rodio pulls in. Released rodio
+0.22.2 requires cpal ^0.17 — that is why upstream's lock holds 0.17.3 — and
+rodio master requires ^0.18. Neither matches a 0.19.0 cpal, and cargo's
+fallback for an unmatched [patch] would resolve rodio's cpal from crates.io,
+a second cpal/alsa-sys pair, which `links = "alsa"` forbids. Nor is there a
+cpal rev that would satisfy rodio master as it stands: master was renumbered
+0.19.0 by 5a53a0e (2026-05-27), two months BEFORE the alsa fix f040088
+(2026-07-31), so every rev carrying the fix reads 0.19.0. So rodio comes
+from b0bbywan/rodio branch `cpal-0.19`: rodio master (880aaba) plus the
+one-line `cpal = "0.19"` bump upstream will make itself at that release. It
+still declares version 0.22.2, so qbz's `rodio = "0.22"` requirement is
+unchanged.
 
 Across the 0.18 → 0.19 bump the only cpal API change rodio trips is a
 rename (`StreamTrait::play` deprecated in favour of `start` — two warnings,
-old name still works); qbz names neither cpal nor its types. rodio master
-raises MSRV to rustc 1.95, which the builders' rustup-installed stable
-satisfies. Revs rather than branches, so a rebuild resolves the same
-sources.
+old name still works). rodio master raises MSRV to rustc 1.95, which the
+builders' rustup-installed stable satisfies. Revs rather than branches, so a
+rebuild resolves the same sources.
 
-Still needed on v2.1.0 (2026-09-08): crates.io has cpal 0.18.2 and rodio
-0.22.2, upstream asks for alsa 0.11, and its lock resolves cpal 0.17.3. The
-workspace now carries a [patch.crates-io] of its own (a vendored rust_cast),
-so the two pins join it instead of creating the section.
+qbz DOES name a cpal type now, which is why this patch stopped being
+manifest-only at v2.1.1. The #660 fix added qbz-audio/src/stream_health.rs,
+written against cpal 0.17's `StreamError` enum — upstream's lock resolves
+0.17.3, so it compiles there. cpal folded every error into one
+`Error` + `ErrorKind` pair in 0.18, so `rodio::cpal::StreamError` does not
+exist behind any cpal this patch can pin, released or not. The triage now
+reads `err.kind()`:
+
+  DeviceNotAvailable      Wedged, as before.
+  StreamInvalidated       Wedged. New: cpal says outright that the stream
+                          has to be rebuilt, which is exactly the verdict.
+  BackendError + POLLERR  Wedged. The 0.17 text match, kept as a guard.
+  everything else         Transient, as before.
+
+The irony is that the pinned cpal fixes the bug stream_health.rs exists to
+survive: its ALSA worker calls prepare() on an xrun, try_resume() on a
+suspend, and reports a disconnect as DeviceNotAvailable, so the POLLERR
+spin cannot happen and no xrun ever reaches the callback. Hence the two
+test cases that constructed `StreamError::BufferUnderrun` — a variant with
+no 0.19 counterpart, because an underrun is no longer an event a stream
+hears about — now use `DeviceChanged`, the reroute that likewise leaves the
+stream running. The four call sites pass type-inferred closures and are
+untouched.
+
+Still needed on v2.1.1 (2026-09-11): crates.io has cpal 0.18.2 and rodio
+0.22.2, cpal 0.18.2 still asks for alsa ^0.11 / alsa-sys ^0.4 so no release
+carries the fix, upstream asks for alsa 0.11, and its lock resolves cpal
+0.17.3. The workspace's own [patch.crates-io] holds two entries as of this
+tag (a vendored rust_cast and a path rupnp), so the two pins join it instead
+of creating the section.
 
 Verified with `cargo tree --locked -p qbzd -e normal`: a single alsa-sys
 0.6.1 (crates.io) in the graph, alsa 0.12.1 (crates.io), cpal 0.19.0 (git
-master), rodio 0.22.2 (git fork), and `cargo check --locked -p qbzd`
-passes on amd64. cpal's PulseAudio backend stays in the graph via rodio's
+master), rodio 0.22.2 (git fork); `cargo check --locked -p qbzd` and
+`cargo test --locked -p qbz-audio --lib stream_health` (7 tests) both pass
+on amd64. cpal's PulseAudio backend stays in the graph via rodio's
 default features; the `pulseaudio` crate is pure Rust (no build script, no
 libpulse), so the NEEDED list is unchanged.
 
-Drop this patch once cpal 0.19 is released and rodio requires it; the
-fork branch and the alsa version requirements die with it.
+Drop this patch once cpal 0.19 is released and rodio requires it; the fork
+branch, the alsa version requirements and the stream_health.rs hunk die with
+it — that last one reverts to upstream's file only if upstream has moved to
+the unified cpal error API by then, which it must have to build at all.
 
 diff --git a/crates/Cargo.lock b/crates/Cargo.lock
-index 3a4c3787..19d197a1 100644
+index 10adec5e..83c66d1e 100644
 --- a/crates/Cargo.lock
 +++ b/crates/Cargo.lock
 @@ -60,9 +60,9 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
@@ -92,7 +125,7 @@ index 3a4c3787..19d197a1 100644
   "libc",
   "pkg-config",
  ]
-@@ -357,6 +358,43 @@ version = "1.1.2"
+@@ -336,6 +337,43 @@ version = "1.1.2"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
  
@@ -136,7 +169,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "autocfg"
  version = "1.5.1"
-@@ -561,12 +599,6 @@ dependencies = [
+@@ -540,12 +578,6 @@ dependencies = [
   "shlex",
  ]
  
@@ -149,7 +182,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "cfg-if"
  version = "1.0.4"
-@@ -905,13 +937,15 @@ dependencies = [
+@@ -875,13 +907,15 @@ dependencies = [
  
  [[package]]
  name = "cpal"
@@ -168,7 +201,7 @@ index 3a4c3787..19d197a1 100644
   "jni",
   "js-sys",
   "libc",
-@@ -927,10 +961,11 @@ dependencies = [
+@@ -897,10 +931,11 @@ dependencies = [
   "objc2-core-audio-types",
   "objc2-core-foundation",
   "objc2-foundation 0.3.2",
@@ -182,7 +215,7 @@ index 3a4c3787..19d197a1 100644
  ]
  
  [[package]]
-@@ -1541,6 +1576,17 @@ version = "1.1.1"
+@@ -1505,6 +1540,17 @@ version = "1.1.1"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
  
@@ -200,7 +233,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "enumflags2"
  version = "0.7.12"
-@@ -1836,6 +1882,21 @@ dependencies = [
+@@ -1782,6 +1828,21 @@ dependencies = [
   "libc",
  ]
  
@@ -222,7 +255,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "futures-channel"
  version = "0.3.34"
-@@ -1852,6 +1913,17 @@ version = "0.3.34"
+@@ -1798,6 +1859,17 @@ version = "0.3.34"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
  
@@ -240,7 +273,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "futures-io"
  version = "0.3.34"
-@@ -1900,6 +1972,7 @@ version = "0.3.34"
+@@ -1846,6 +1918,7 @@ version = "0.3.34"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
  dependencies = [
@@ -248,7 +281,7 @@ index 3a4c3787..19d197a1 100644
   "futures-core",
   "futures-io",
   "futures-macro",
-@@ -2600,18 +2673,32 @@ dependencies = [
+@@ -2527,18 +2600,32 @@ dependencies = [
  
  [[package]]
  name = "jni"
@@ -287,7 +320,7 @@ index 3a4c3787..19d197a1 100644
  ]
  
  [[package]]
-@@ -2910,12 +2997,9 @@ dependencies = [
+@@ -2837,12 +2924,9 @@ dependencies = [
  
  [[package]]
  name = "mach2"
@@ -302,7 +335,7 @@ index 3a4c3787..19d197a1 100644
  
  [[package]]
  name = "malloc_buf"
-@@ -3250,7 +3334,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -3168,7 +3252,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
  dependencies = [
   "autocfg",
@@ -310,7 +343,7 @@ index 3a4c3787..19d197a1 100644
  ]
  
  [[package]]
-@@ -3368,6 +3451,7 @@ version = "0.3.2"
+@@ -3285,6 +3368,7 @@ version = "0.3.2"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
  dependencies = [
@@ -318,7 +351,7 @@ index 3a4c3787..19d197a1 100644
   "objc2 0.6.4",
   "objc2-foundation 0.3.2",
  ]
-@@ -4051,6 +4135,22 @@ dependencies = [
+@@ -3923,6 +4007,22 @@ dependencies = [
   "psl-types",
  ]
  
@@ -341,7 +374,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "pure-rust-locales"
  version = "0.8.2"
-@@ -4944,16 +5044,6 @@ version = "0.10.1"
+@@ -4818,16 +4918,6 @@ version = "0.10.1"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
  
@@ -358,7 +391,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "ratatui"
  version = "0.30.2"
-@@ -5215,15 +5305,12 @@ dependencies = [
+@@ -5089,15 +5179,12 @@ dependencies = [
  [[package]]
  name = "rodio"
  version = "0.22.2"
@@ -376,7 +409,7 @@ index 3a4c3787..19d197a1 100644
   "symphonia",
   "thiserror 2.0.20",
  ]
-@@ -5259,6 +5346,20 @@ version = "0.3.5"
+@@ -5133,6 +5220,20 @@ version = "0.3.5"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "fae8ee26b0371a29a77d2b2d6b3ae13aa81def6f9bf1b1b92a32d279a5e709b7"
  
@@ -397,7 +430,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "rupnp"
  version = "3.0.0"
-@@ -5677,6 +5778,22 @@ version = "0.3.10"
+@@ -5549,6 +5650,22 @@ version = "0.3.10"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
  
@@ -420,7 +453,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "siphasher"
  version = "1.0.3"
-@@ -5940,6 +6057,7 @@ dependencies = [
+@@ -5812,6 +5929,7 @@ dependencies = [
   "bytemuck",
   "lazy_static",
   "log",
@@ -428,8 +461,8 @@ index 3a4c3787..19d197a1 100644
  ]
  
  [[package]]
-@@ -6736,6 +6854,17 @@ dependencies = [
-  "nom 7.1.3",
+@@ -6597,6 +6715,17 @@ dependencies = [
+  "nom",
  ]
  
 +[[package]]
@@ -446,7 +479,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "vtparse"
  version = "0.6.2"
-@@ -7061,6 +7190,15 @@ version = "0.4.0"
+@@ -6852,6 +6981,15 @@ version = "0.4.0"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
  
@@ -462,7 +495,7 @@ index 3a4c3787..19d197a1 100644
  [[package]]
  name = "windows"
  version = "0.44.0"
-@@ -7251,15 +7389,6 @@ dependencies = [
+@@ -7042,15 +7180,6 @@ dependencies = [
   "windows-link 0.2.1",
  ]
  
@@ -479,13 +512,13 @@ index 3a4c3787..19d197a1 100644
  name = "windows-sys"
  version = "0.48.0"
 diff --git a/crates/Cargo.toml b/crates/Cargo.toml
-index af623753..8b19801e 100644
+index 48cbe284..1f1a0879 100644
 --- a/crates/Cargo.toml
 +++ b/crates/Cargo.toml
-@@ -124,6 +124,20 @@ strsim = "0.11"
- # contract. Drop this patch once a rust_cast release carries the fix upstream.
- [patch.crates-io]
+@@ -126,6 +126,20 @@ strsim = "0.11"
  rust_cast = { path = "vendor/rust_cast" }
+ # Narrow UPnP endpoint compatibility; retain current http for every consumer.
+ rupnp = { path = "../third-party/rupnp" }
 +# 32-bit time64: on Debian trixie libasound writes a 16-byte struct timespec,
 +# while libc::timespec stays 8 bytes on arm-unknown-linux-gnueabihf, so
 +# Status::get_htstamp overruns the frame of whoever called it. alsa-sys 0.6.1
@@ -524,3 +557,143 @@ index 393d8335..42a6e667 100644
  libc = "0.2"
  # zbus for org.freedesktop.ReserveDevice1 D-Bus client (device reservation).
  # Pinned to v4 to share the transitive copy already pulled in by
+diff --git a/crates/qbz-audio/src/stream_health.rs b/crates/qbz-audio/src/stream_health.rs
+index 0f11ee4e..19bf46f1 100644
+--- a/crates/qbz-audio/src/stream_health.rs
++++ b/crates/qbz-audio/src/stream_health.rs
+@@ -12,8 +12,16 @@
+ //! This module gives the routes one shared callback that (a) classifies the
+ //! error, (b) rate-limits what reaches the log, and (c) latches a WEDGED
+ //! verdict the audio thread polls so it can drop and rebuild the stream.
+-
+-use rodio::cpal::StreamError;
++//!
++//! Against the cpal pinned by `patches/0003` (master, 0.19.0) the POLLERR
++//! loop itself is gone — that worker calls `prepare()` on an xrun, resumes a
++//! suspended PCM and reports a disconnect as `DeviceNotAvailable` — and the
++//! one `StreamError` enum every callback used to take became the unified
++//! `cpal::Error` + `ErrorKind` pair back in 0.18. So the triage reads
++//! `err.kind()`, and the POLLERR text match survives only as a guard for a
++//! backend that still spins.
++
++use rodio::cpal::{Error, ErrorKind};
+ use std::sync::Mutex;
+ use std::time::{Duration, Instant};
+ 
+@@ -35,13 +43,18 @@ pub enum StreamFault {
+ 
+ /// Classify a cpal stream error. Kept free of side effects so every route
+ /// (System default, ALSA, PipeWire, the legacy CPAL path) judges alike.
+-pub fn classify(err: &StreamError) -> StreamFault {
++pub fn classify(err: &Error) -> StreamFault {
+     let text = err.to_string();
+-    match err {
+-        StreamError::DeviceNotAvailable => StreamFault::Wedged(text),
+-        StreamError::BackendSpecific { err } if err.description.contains("POLLERR") => {
+-            StreamFault::Wedged(text)
+-        }
++    match err.kind() {
++        // The device is gone, or cpal states outright that the stream is no
++        // longer valid: nothing this stream can do recovers either.
++        ErrorKind::DeviceNotAvailable | ErrorKind::StreamInvalidated => StreamFault::Wedged(text),
++        // A backend that still reports the 0.17-era POLLERR loop instead of
++        // recovering from it. Unreachable with the pinned cpal; cheap insurance.
++        ErrorKind::BackendError if text.contains("POLLERR") => StreamFault::Wedged(text),
++        // Everything else — a busy device, an automatic reroute
++        // (`DeviceChanged` keeps the stream running), an unclassified backend
++        // hiccup — leaves the stream usable.
+         _ => StreamFault::Transient(text),
+     }
+ }
+@@ -110,10 +123,10 @@ pub fn clear_wedged() {
+ /// (`DeviceSinkBuilder::with_error_callback`). Logs the first error of a
+ /// burst and then one line per [`LOG_WINDOW`] with the suppressed count, and
+ /// latches a wedge exactly once per stream.
+-pub fn error_callback(route: &'static str) -> impl FnMut(StreamError) + Send + 'static {
++pub fn error_callback(route: &'static str) -> impl FnMut(Error) + Send + 'static {
+     let mut limiter = FloodLimiter::new(LOG_WINDOW);
+     let mut latched = false;
+-    move |err: StreamError| {
++    move |err: Error| {
+         let fault = classify(&err);
+         if let Some(suppressed) = limiter.admit(Instant::now()) {
+             if suppressed == 0 {
+@@ -137,19 +150,18 @@ pub fn error_callback(route: &'static str) -> impl FnMut(StreamError) + Send + '
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+-    use rodio::cpal::{BackendSpecificError, StreamError};
++    use rodio::cpal::{Error, ErrorKind};
+     use std::sync::Mutex;
+     use std::time::{Duration, Instant};
+ 
+     /// The wedge latch is process-wide; serialise the tests that touch it.
+     static LATCH_TESTS: Mutex<()> = Mutex::new(());
+ 
+-    fn pollerr() -> StreamError {
+-        StreamError::BackendSpecific {
+-            err: BackendSpecificError {
+-                description: "`alsa::poll()` returned POLLERR".to_string(),
+-            },
+-        }
++    fn pollerr() -> Error {
++        Error::with_message(
++            ErrorKind::BackendError,
++            "`alsa::poll()` returned POLLERR".to_string(),
++        )
+     }
+ 
+     #[test]
+@@ -160,24 +172,33 @@ mod tests {
+     #[test]
+     fn device_loss_is_a_wedged_stream() {
+         assert!(matches!(
+-            classify(&StreamError::DeviceNotAvailable),
++            classify(&Error::new(ErrorKind::DeviceNotAvailable)),
+             StreamFault::Wedged(_)
+         ));
+     }
+ 
+     #[test]
+-    fn underrun_and_other_backend_errors_are_transient() {
+-        // cpal recovers an EPIPE underrun itself (try_recover); a one-off
+-        // backend error is not a reason to rebuild the stream.
++    fn an_invalidated_stream_is_wedged() {
++        // cpal 0.19 says it outright when a stream has to be rebuilt.
+         assert!(matches!(
+-            classify(&StreamError::BufferUnderrun),
++            classify(&Error::new(ErrorKind::StreamInvalidated)),
++            StreamFault::Wedged(_)
++        ));
++    }
++
++    #[test]
++    fn reroutes_and_other_backend_errors_are_transient() {
++        // cpal recovers an xrun itself (prepare()) and never surfaces it, and
++        // an automatic reroute leaves the stream running: neither is a reason
++        // to rebuild.
++        assert!(matches!(
++            classify(&Error::new(ErrorKind::DeviceChanged)),
+             StreamFault::Transient(_)
+         ));
+-        let other = StreamError::BackendSpecific {
+-            err: BackendSpecificError {
+-                description: "snd_pcm_writei returned EAGAIN".to_string(),
+-            },
+-        };
++        let other = Error::with_message(
++            ErrorKind::BackendError,
++            "snd_pcm_writei returned EAGAIN".to_string(),
++        );
+         assert!(matches!(classify(&other), StreamFault::Transient(_)));
+     }
+ 
+@@ -219,7 +240,7 @@ mod tests {
+         assert!(take_wedged().is_some());
+         assert_eq!(take_wedged(), None);
+         // A transient error never latches.
+-        callback(StreamError::BufferUnderrun);
++        callback(Error::new(ErrorKind::DeviceChanged));
+         assert_eq!(take_wedged(), None);
+     }
+ }

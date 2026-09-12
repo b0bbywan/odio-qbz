@@ -173,6 +173,17 @@ portability, and the desktop app is what gets exercised day to day:
   [fork branch](https://github.com/b0bbywan/rodio/tree/cpal-0.19): rodio master
   plus the one-line `cpal = "0.19"` bump upstream will make itself at the cpal
   release. Both pins drop together once cpal 0.19 is out and rodio requires it.
+
+  Since v2.1.1 this patch also touches source, which it never used to. The
+  [#660](https://github.com/vicrodh/qbz/issues/660) fix added
+  `qbz-audio/src/stream_health.rs`, written against cpal 0.17's `StreamError`
+  enum — correct upstream, whose lock resolves 0.17.3, but cpal folded every
+  error into one `Error` + `ErrorKind` pair in **0.18**, so the file cannot
+  compile against any cpal new enough to carry the time64 fix. The triage now
+  reads `err.kind()`. The irony is that the pinned cpal fixes the very bug
+  that module exists to survive: its ALSA worker recovers an xrun with
+  `prepare()` and a suspend with `try_resume()`, so the POLLERR spin cannot
+  happen there.
 - `0005-mpris-implement-shuffle-and-loopstatus.patch` — the MPRIS `Shuffle`
   and `LoopStatus` properties were published but stubbed: always `false` /
   `None`, and writes were dropped, so a media widget showed buttons that did
@@ -218,13 +229,13 @@ build.
 Tag this repo with the upstream version to release:
 
 ```bash
-git tag v2.1.0 && git push origin v2.1.0
+git tag v2.1.1 && git push origin v2.1.1
 ```
 
 A prerelease, routed to the APT repo's `testing` suite, uses a suffix:
 
 ```bash
-git tag v2.1.1-alpha.1 && git push origin v2.1.1-alpha.1
+git tag v2.1.2-alpha.1 && git push origin v2.1.2-alpha.1
 ```
 
 The suffix must be `-rc`, `-beta` or `-alpha`; the number may be attached
@@ -233,12 +244,12 @@ words are not a style choice: `odio-ci` marks the GitHub Release as a
 prerelease on exactly them, and `odio-apt-repo` reads that flag to pick the
 suite, so a `-pre1` tag would build and then land in `stable`. The suffix
 becomes a Debian-sortable `~alpha.1` in the package version, which sorts below
-`2.1.1` where a dash-revision would sort above.
+`2.1.2` where a dash-revision would sort above.
 
 ### When `patches/` targets a branch instead of a tag
 
 `patches/` is written against `UPSTREAM_DEV_REF` in `build.yml`, normally the
-upstream tag of the last release (`v2.1.0` today). Between releases it can be
+upstream tag of the last release (`v2.1.1` today). Between releases it can be
 rebased onto upstream's `pre-release` branch instead, to ship fixes that are
 merged but not tagged. Then no upstream tag applies, so
 `PRERELEASE_TRACKS_DEV_REF` is set to `true` and a prerelease tag builds
@@ -287,7 +298,7 @@ loudly if `patches/` has not moved onto the tag yet.
 nothing:
 
 ```bash
-gh workflow run build.yml -f upstream_ref=pre-release -f version=2.1.0+pre.1
+gh workflow run build.yml -f upstream_ref=pre-release -f version=2.1.1+pre.1
 ```
 
 ## Build gates
@@ -317,10 +328,10 @@ All of them run inside the builder, natively, so they need no cross tooling:
 ## Building locally
 
 ```bash
-git clone --depth 1 --branch v2.1.0 https://github.com/vicrodh/qbz upstream
+git clone --depth 1 --branch v2.1.1 https://github.com/vicrodh/qbz upstream
 # only needed for armhf, and only if binfmt is not already registered:
 docker run --privileged --rm tonistiigi/binfmt --install arm
-./scripts/build-qbzd-deb.sh --arch armhf --version 2.1.0
+./scripts/build-qbzd-deb.sh --arch armhf --version 2.1.1
 ```
 
 The checkout must live at `./upstream` — it is part of the docker build
